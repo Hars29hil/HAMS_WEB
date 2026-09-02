@@ -4,36 +4,18 @@ export const connectToESP32 = async (): Promise<string> => {
   }
 
   try {
-    const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
-    const CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
-
     console.log('Requesting Bluetooth Device...');
     const device = await (navigator as any).bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_UUID] }],
-      optionalServices: [SERVICE_UUID]
+      acceptAllDevices: true
     });
 
-    console.log('Connecting to GATT Server...');
-    const server = await device.gatt?.connect();
+    console.log('Device selected:', device.name || 'Unknown Device');
     
-    if (!server) throw new Error('Could not connect to GATT Server.');
-
-    console.log('Getting Service...');
-    const service = await server.getPrimaryService(SERVICE_UUID);
-
-    console.log('Getting Characteristic...');
-    const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-    console.log('Reading Value...');
-    const value = await characteristic.readValue();
-    const token = new TextDecoder().decode(value);
-
-    // Optionally disconnect here if needed
-    device.gatt?.disconnect();
-    
-    return token.trim();
+    // We do not connect to GATT. We just verified proximity by having the user select the device.
+    // Return NONE so the frontend triggers the fallback token request to the backend.
+    return 'NONE';
   } catch (error: any) {
     console.error('BLE Error:', error);
-    throw new Error(error.message || 'Failed to connect via Bluetooth.');
+    throw new Error(error.message || 'Failed to scan for Bluetooth device.');
   }
 };
