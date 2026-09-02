@@ -9,29 +9,13 @@ export const connectToESP32 = async (): Promise<string> => {
 
     console.log('Requesting Bluetooth Device...');
     const device = await (navigator as any).bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_UUID] }],
-      optionalServices: [SERVICE_UUID]
+      acceptAllDevices: true
     });
 
-    console.log('Connecting to GATT Server...');
-    const server = await device.gatt?.connect();
+    console.log('Device selected:', device.name || 'Unknown Device');
     
-    if (!server) throw new Error('Could not connect to GATT Server.');
-
-    console.log('Getting Service...');
-    const service = await server.getPrimaryService(SERVICE_UUID);
-
-    console.log('Getting Characteristic...');
-    const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-    console.log('Reading Value...');
-    const value = await characteristic.readValue();
-    const token = new TextDecoder().decode(value);
-
-    // Optionally disconnect here if needed
-    device.gatt?.disconnect();
-    
-    return token.trim();
+    // Proximity verified by user selection. Do not connect to GATT.
+    return 'NONE';
   } catch (error: any) {
     console.error('BLE Error:', error);
     throw new Error(error.message || 'Failed to connect via Bluetooth.');
