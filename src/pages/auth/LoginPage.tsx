@@ -9,6 +9,7 @@ import './LoginPage.css';
 
 export const LoginPage: React.FC = () => {
   const [bankCode, setBankCode] = useState('');
+  const [assignedMobile, setAssignedMobile] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -20,6 +21,10 @@ export const LoginPage: React.FC = () => {
       setError('Please enter your Bank Code.');
       return;
     }
+    if (!assignedMobile.trim()) {
+      setError('Please enter your Assigned Mobile Number.');
+      return;
+    }
 
     setIsLoading(true);
     setError('');
@@ -27,7 +32,7 @@ export const LoginPage: React.FC = () => {
     try {
       const response = await apiClient.post('/auth/login', {
         username: bankCode,
-        sim_numbers: [] // Web cannot read SIM cards
+        sim_numbers: [assignedMobile]
       });
 
       if (response.data.success) {
@@ -52,7 +57,7 @@ export const LoginPage: React.FC = () => {
   return (
     <div className="login-container">
       <div className="login-wrapper">
-        
+
         <div className="logo-section">
           <div className="logo-glow">
             <Fingerprint size={48} color="white" />
@@ -64,7 +69,7 @@ export const LoginPage: React.FC = () => {
         <HamsCard padding="2rem" className="login-card">
           <h2 className="login-title">Secure Login</h2>
           <p className="login-subtitle">Enter your details to access your dashboard.</p>
-          
+
           {error && <div className="error-message">{error}</div>}
 
           <form onSubmit={handleLogin} className="login-form">
@@ -80,7 +85,20 @@ export const LoginPage: React.FC = () => {
                 />
               </div>
             </div>
-            
+
+            <div className="input-group">
+              <label>Assigned Mobile Number</label>
+              <div className="input-wrapper">
+                <BadgeIcon size={20} className="input-icon" />
+                <input
+                  type="text"
+                  placeholder="Enter your Assigned Mobile Number"
+                  value={assignedMobile}
+                  onChange={(e) => setAssignedMobile(e.target.value)}
+                />
+              </div>
+            </div>
+
             <HamsButton type="submit" label="Secure Login" isLoading={isLoading} style={{ width: '100%', marginTop: '1rem' }} />
           </form>
         </HamsCard>
