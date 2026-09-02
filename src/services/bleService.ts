@@ -6,7 +6,7 @@ export interface BLEConnection {
 
 export const connectToESP32 = async (): Promise<BLEConnection> => {
   if (!(navigator as any).bluetooth) {
-    throw new Error('Web Bluetooth API is not supported in this browser. Please use Chrome on a supported OS.');
+    throw new Error("Web Bluetooth API is not supported in this browser. Please use Chrome on a supported OS.<br/><br/>If you are using the IOS DEVICE than dolwoand <a href='https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055' target='_blank' style='color: #4da6ff; text-decoration: underline;'>BLUEFY</a> browser from AppStore.");
   }
 
   try {

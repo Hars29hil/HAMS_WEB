@@ -165,7 +165,7 @@ export const StudentDashboard: React.FC = () => {
               <h3 className="action-title">Mark Attendance</h3>
               <p className="action-desc">Be physically present on your assigned floor and ensure Bluetooth is enabled.</p>
               
-              {error && <div className="error-message" style={{ marginTop: '1rem' }}>{error}</div>}
+              {error && <div className="error-message" style={{ marginTop: '1rem' }} dangerouslySetInnerHTML={{ __html: error }}></div>}
             </div>
           )}
         </HamsCard>
