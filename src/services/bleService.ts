@@ -15,7 +15,7 @@ export const connectToESP32 = async (): Promise<BLEConnection> => {
 
     console.log('Requesting Bluetooth Device...');
     const device = await (navigator as any).bluetooth.requestDevice({
-      filters: [{ namePrefix: 'Hostel_floor_Beacon' }],
+      acceptAllDevices: true,
       optionalServices: [SERVICE_UUID]
     });
 
