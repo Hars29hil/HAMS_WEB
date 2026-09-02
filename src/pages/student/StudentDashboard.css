@@ -1,0 +1,230 @@
+.dashboard-container {
+  min-height: 100vh;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dashboard-header {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  margin-bottom: 2rem;
+  border-radius: 100px !important;
+}
+
+.dashboard-header h2 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.logout-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.5rem;
+  transition: color 0.2s;
+}
+
+.logout-btn:hover {
+  color: var(--color-error);
+}
+
+.dashboard-content {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeUp 0.6s ease forwards;
+}
+
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  background: var(--gradient-accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 800;
+  box-shadow: var(--shadow-glow);
+  margin-bottom: 1rem;
+}
+
+.welcome-text {
+  font-size: 1.4rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+}
+
+.info-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-icon-wrapper {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-accent);
+  padding: 0.6rem;
+  border-radius: 12px;
+  margin-right: 1rem;
+}
+
+.info-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.info-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.schedule-banner {
+  display: flex;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  gap: 1rem;
+}
+
+.schedule-banner.active {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.schedule-banner.inactive {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.schedule-banner.active .status-dot {
+  background: var(--color-success);
+  box-shadow: 0 0 10px var(--color-success);
+}
+
+.schedule-banner.inactive .status-dot {
+  background: var(--color-warning);
+  box-shadow: 0 0 10px var(--color-warning);
+}
+
+.status-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.schedule-banner.active .status-title { color: var(--color-success); }
+.schedule-banner.inactive .status-title { color: var(--color-warning); }
+
+.status-time {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.attendance-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.mark-btn {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: var(--gradient-accent);
+  border: none;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-glow);
+  transition: transform 0.2s, box-shadow 0.2s;
+  z-index: 20;
+  position: relative;
+}
+
+.mark-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+}
+
+.mark-btn.marking {
+  opacity: 0.8;
+  cursor: wait;
+}
+
+.action-title {
+  margin-top: 1.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.action-desc {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: 0.5rem;
+}
+
+.success-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 16px;
+}
+
+.success-banner h3 {
+  color: var(--color-success);
+  margin: 1rem 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.success-banner p {
+  color: var(--color-success);
+  opacity: 0.8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
