@@ -15,7 +15,8 @@ export const connectToESP32 = async (): Promise<BLEConnection> => {
 
     console.log('Requesting Bluetooth Device...');
     const device = await (navigator as any).bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_UUID] }]
+      acceptAllDevices: true,
+      optionalServices: [SERVICE_UUID]
     });
 
     console.log('Connecting to GATT Server...');
