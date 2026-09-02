@@ -26,12 +26,20 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
+    const trimmedBankCode = bankCode.trim();
+    const registeredUser = localStorage.getItem('registered_device_user');
+    
+    if (registeredUser && registeredUser !== trimmedBankCode) {
+      setError('Security Alert: This device is already permanently registered to another student. You cannot log in with a different account on this device.');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
 
     try {
       const response = await apiClient.post('/auth/login', {
-        username: bankCode,
+        username: trimmedBankCode,
         sim_numbers: [assignedMobile]
       });
 
@@ -40,6 +48,7 @@ export const LoginPage: React.FC = () => {
         login(token, user);
 
         if (user.role === 'STUDENT') {
+          localStorage.setItem('registered_device_user', trimmedBankCode);
           navigate('/student');
         } else {
           navigate('/admin');
