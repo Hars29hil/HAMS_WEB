@@ -52,24 +52,32 @@ export const StudentDashboard: React.FC = () => {
 
     try {
       // 1. Connect via Web Bluetooth and read token
-      const bleToken = await connectToESP32();
+      const bleConnection = await connectToESP32();
       
-      let tokenToUse = bleToken;
+      let tokenToUse = bleConnection.token;
 
       // 2. If token is NONE (bridged mode), get a new one from backend
-      if (bleToken === 'NONE') {
+      if (tokenToUse === 'NONE') {
         const reqRes = await apiClient.post('/attendance/request-token', { rssi: -50 });
         if (reqRes.data.success) {
-          // Typically we would write this back to ESP32 here, but we will skip the write for Web implementation simplicity 
-          // or we can just assume the backend marked it successfully during request-token.
           tokenToUse = reqRes.data.token;
+          
+          // Write the new token to the ESP-32 to turn on the blue light and activate it!
+          // Defaulting to 5 minutes duration as in the original app.
+          await bleConnection.writeToken(tokenToUse, 5);
+          
+          bleConnection.disconnect();
+          
           setAlreadyMarked(true);
           setSuccess('Attendance marked successfully as the first student!');
           return;
         }
       }
 
-      // 3. Mark attendance with token
+      // 3. We have a valid token, disconnect to free up ESP-32 for others
+      bleConnection.disconnect();
+
+      // 4. Mark attendance with token
       const res = await apiClient.post('/attendance/mark', { ble_token: tokenToUse, rssi: -50 });
       if (res.data.success) {
         setAlreadyMarked(true);

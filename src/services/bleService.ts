@@ -1,4 +1,10 @@
-export const connectToESP32 = async (): Promise<string> => {
+export interface BLEConnection {
+  token: string;
+  writeToken: (newToken: string, durationMinutes: number) => Promise<void>;
+  disconnect: () => void;
+}
+
+export const connectToESP32 = async (): Promise<BLEConnection> => {
   if (!(navigator as any).bluetooth) {
     throw new Error('Web Bluetooth API is not supported in this browser. Please use Chrome on a supported OS.');
   }
@@ -26,12 +32,23 @@ export const connectToESP32 = async (): Promise<string> => {
 
     console.log('Reading Value...');
     const value = await characteristic.readValue();
-    const token = new TextDecoder().decode(value);
+    const token = new TextDecoder().decode(value).trim();
 
-    // Disconnect to free up the ESP-32 for the next student
-    device.gatt?.disconnect();
-    
-    return token.trim();
+    const writeToken = async (newToken: string, durationMinutes: number) => {
+      const writeCommand = `SET:${newToken}:${durationMinutes}`;
+      console.log('Writing to ESP32:', writeCommand);
+      const encoder = new TextEncoder();
+      await characteristic.writeValue(encoder.encode(writeCommand));
+    };
+
+    const disconnect = () => {
+      if (device.gatt?.connected) {
+        console.log('Disconnecting from ESP32...');
+        device.gatt.disconnect();
+      }
+    };
+
+    return { token, writeToken, disconnect };
   } catch (error: any) {
     console.error('BLE Error:', error);
     throw new Error(error.message || 'Failed to connect via Bluetooth.');
