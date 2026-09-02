@@ -32,7 +32,7 @@ export const connectToESP32 = async (): Promise<BLEConnection> => {
 
     console.log('Reading Value...');
     const value = await characteristic.readValue();
-    const token = new TextDecoder().decode(value).trim();
+    const token = new TextDecoder().decode(value).replace(/\0/g, '').trim();
 
     const writeToken = async (newToken: string, durationMinutes: number) => {
       const writeCommand = `SET:${newToken}:${durationMinutes}`;

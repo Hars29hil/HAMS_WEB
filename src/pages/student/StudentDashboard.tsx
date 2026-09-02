@@ -66,11 +66,7 @@ export const StudentDashboard: React.FC = () => {
           // Defaulting to 5 minutes duration as in the original app.
           await bleConnection.writeToken(tokenToUse, 5);
           
-          bleConnection.disconnect();
-          
-          setAlreadyMarked(true);
-          setSuccess('Attendance marked successfully as the first student!');
-          return;
+          // Do NOT return early. We must proceed to step 4 to actually call /attendance/mark !
         }
       }
 
