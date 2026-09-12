@@ -54,8 +54,8 @@ apiClient.interceptors.response.use(
         });
       }
       
-      if (url.includes('/attendance/request-token')) {
-        return Promise.resolve({ data: { success: true, token: 'mock_ble_token' } });
+      if (url.includes('/attendance/challenge')) {
+        return Promise.resolve({ data: { success: true, challenge: 'mock_ble_challenge_token' } });
       }
       
       if (url.includes('/attendance/mark')) {

@@ -58,9 +58,9 @@ export const StudentDashboard: React.FC = () => {
 
       // 2. If token is NONE (bridged mode), get a new one from backend
       if (tokenToUse === 'NONE') {
-        const reqRes = await apiClient.post('/attendance/request-token', { rssi: -50 });
+        const reqRes = await apiClient.post('/attendance/challenge', { rssi: -50 });
         if (reqRes.data.success) {
-          tokenToUse = reqRes.data.token;
+          tokenToUse = reqRes.data.challenge;
           
           // Write the new token to the ESP-32 to turn on the blue light and activate it!
           // Defaulting to 5 minutes duration as in the original app.
