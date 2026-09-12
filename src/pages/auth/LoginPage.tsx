@@ -26,12 +26,10 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    const trimmedBankCode = bankCode.trim();
-    const registeredUser = localStorage.getItem('registered_device_user');
-    
-    if (registeredUser && registeredUser !== trimmedBankCode) {
-      setError('Security Alert: This device is already permanently registered to another student. You cannot log in with a different account on this device.');
-      return;
+    // Trim and remove leading zeros so "0987" becomes "987"
+    let trimmedBankCode = bankCode.trim().replace(/^0+/, '');
+    if (trimmedBankCode === '') {
+      trimmedBankCode = '0';
     }
 
     setIsLoading(true);
@@ -48,7 +46,6 @@ export const LoginPage: React.FC = () => {
         login(token, user);
 
         if (user.role === 'STUDENT') {
-          localStorage.setItem('registered_device_user', trimmedBankCode);
           navigate('/student');
         } else {
           navigate('/admin');
@@ -90,7 +87,7 @@ export const LoginPage: React.FC = () => {
                   type="text"
                   placeholder="Enter your Bank Code (e.g., 01723)"
                   value={bankCode}
-                  onChange={(e) => setBankCode(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankCode(e.target.value)}
                 />
               </div>
             </div>
@@ -103,7 +100,7 @@ export const LoginPage: React.FC = () => {
                   type="text"
                   placeholder="Enter your Assigned Mobile Number"
                   value={assignedMobile}
-                  onChange={(e) => setAssignedMobile(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAssignedMobile(e.target.value)}
                 />
               </div>
             </div>
