@@ -9,7 +9,6 @@ import './LoginPage.css';
 
 export const LoginPage: React.FC = () => {
   const [bankCode, setBankCode] = useState('');
-  const [assignedMobile, setAssignedMobile] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -19,10 +18,6 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     if (!bankCode.trim()) {
       setError('Please enter your Bank Code.');
-      return;
-    }
-    if (!assignedMobile.trim()) {
-      setError('Please enter your Assigned Mobile Number.');
       return;
     }
 
@@ -37,8 +32,7 @@ export const LoginPage: React.FC = () => {
 
     try {
       const response = await apiClient.post('/auth/login', {
-        username: trimmedBankCode,
-        sim_numbers: [assignedMobile]
+        username: trimmedBankCode
       });
 
       if (response.data.success) {
@@ -88,19 +82,6 @@ export const LoginPage: React.FC = () => {
                   placeholder="Enter your Bank Code (e.g., 01723)"
                   value={bankCode}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankCode(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="input-group">
-              <label>Assigned Mobile Number</label>
-              <div className="input-wrapper">
-                <BadgeIcon size={20} className="input-icon" />
-                <input
-                  type="text"
-                  placeholder="Enter your Assigned Mobile Number"
-                  value={assignedMobile}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAssignedMobile(e.target.value)}
                 />
               </div>
             </div>
