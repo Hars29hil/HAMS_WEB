@@ -4,6 +4,7 @@ import { useAuth } from './context/AuthContext';
 import { LoginPage } from './pages/auth/LoginPage';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { LeaderDashboard } from './pages/leader/LeaderDashboard';
 
 // Route Protectors
 const StudentRoute = ({ children }: { children: React.ReactNode }) => {
@@ -14,7 +15,13 @@ const StudentRoute = ({ children }: { children: React.ReactNode }) => {
 
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { token, user } = useAuth();
-  if (!token || (user?.role !== 'ADMIN' && user?.role !== 'LEADER')) return <Navigate to="/login" replace />;
+  if (!token || user?.role !== 'ADMIN') return <Navigate to="/login" replace />;
+  return <>{children}</>;
+};
+
+const LeaderRoute = ({ children }: { children: React.ReactNode }) => {
+  const { token, user } = useAuth();
+  if (!token || user?.role !== 'LEADER') return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
@@ -28,7 +35,9 @@ function App() {
           path="/" 
           element={
             token ? (
-              user?.role === 'STUDENT' ? <Navigate to="/student" replace /> : <Navigate to="/admin" replace />
+              user?.role === 'STUDENT' ? <Navigate to="/student" replace /> : 
+              user?.role === 'LEADER' ? <Navigate to="/leader" replace /> :
+              <Navigate to="/admin" replace />
             ) : (
               <Navigate to="/login" replace />
             )
@@ -52,6 +61,15 @@ function App() {
             <AdminRoute>
               <AdminDashboard />
             </AdminRoute>
+          } 
+        />
+
+        <Route 
+          path="/leader/*" 
+          element={
+            <LeaderRoute>
+              <LeaderDashboard />
+            </LeaderRoute>
           } 
         />
 

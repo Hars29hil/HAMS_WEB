@@ -43,6 +43,8 @@ export const LoginPage: React.FC = () => {
 
         if (user.role === 'STUDENT') {
           navigate('/student');
+        } else if (user.role === 'LEADER') {
+          navigate('/leader');
         } else {
           navigate('/admin');
         }
