@@ -140,3 +140,118 @@
     padding: 1rem;
   }
 }
+
+/* Tabs */
+.leader-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1rem;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 1.1rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+}
+
+.tab-btn.active {
+  background: rgba(37, 99, 235, 0.15);
+  color: #3b82f6; /* var(--color-primary) */
+}
+
+/* Mobile Assignment */
+.section-desc {
+  color: var(--color-text-muted);
+  margin-top: -1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.mobile-assign-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.mobile-input-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--color-text-muted);
+}
+
+.input-wrapper input {
+  padding: 0.6rem 1rem 0.6rem 2.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 200px;
+}
+
+.input-wrapper input:focus {
+  border-color: #3b82f6;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.save-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.save-btn:hover {
+  background: #2563eb;
+}
+
+.save-btn:disabled {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .mobile-input-group {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .input-wrapper input {
+    width: 100%;
+  }
+}
