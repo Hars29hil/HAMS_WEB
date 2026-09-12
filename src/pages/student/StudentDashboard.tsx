@@ -74,7 +74,7 @@ export const StudentDashboard: React.FC = () => {
       bleConnection.disconnect();
 
       // 4. Mark attendance with token
-      const res = await apiClient.post('/attendance/mark', { ble_token: tokenToUse, rssi: -50 });
+      const res = await apiClient.post('/attendance/mark', { proof: tokenToUse, rssi: -50 });
       if (res.data.success) {
         setAlreadyMarked(true);
         setSuccess('Attendance marked successfully!');
