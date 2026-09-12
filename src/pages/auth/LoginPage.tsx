@@ -31,48 +31,30 @@ export const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      let token = 'mock_token_for_testing';
+      const response = await apiClient.post('/auth/login', {
+        username: trimmedBankCode
+      });
       
-      // Mock dictionary for testing (since the real API is blocked/failing)
-      const mockUsers: Record<string, any> = {
-        '987': { name: 'Harshil', room: '409', phone: '9876543210', email: 'harshil@example.com', floor_id: 4 },
-        '123': { name: 'John Doe', room: '101', phone: '1234567890', email: 'john@example.com', floor_id: 1 }
-      };
+      if (response.data.success) {
+        const token = response.data.data.token;
+        const user = response.data.data.user;
+        
+        login(token, user);
 
-      const matchedUser = mockUsers[trimmedBankCode] || {
-        name: 'Test User ' + trimmedBankCode,
-        room: 'N/A',
-        phone: '0000000000',
-        email: 'test@example.com',
-        floor_id: 1
-      };
-
-      let user: any = {
-        role: trimmedBankCode.toLowerCase() === 'admin' ? 'ADMIN' : 'STUDENT',
-        ...matchedUser
-      };
-
-      try {
-        const response = await apiClient.post('/auth/login', {
-          username: trimmedBankCode
-        });
-        if (response.data.success) {
-          token = response.data.data.token;
-          user = response.data.data.user;
+        if (user.role === 'STUDENT') {
+          navigate('/student');
+        } else {
+          navigate('/admin');
         }
-      } catch (apiErr) {
-        console.warn('API login failed or mobile not assigned. Bypassing check to allow login.');
-      }
-
-      login(token, user);
-
-      if (user.role === 'STUDENT') {
-        navigate('/student');
       } else {
-        navigate('/admin');
+        setError(response.data.message || 'Login failed.');
       }
     } catch (err: any) {
-      setError('An unexpected error occurred.');
+      if (err.response?.data?.message) {
+        setError(err.response.data.message);
+      } else {
+        setError('Login failed. Please check your credentials and try again.');
+      }
     } finally {
       setIsLoading(false);
     }
