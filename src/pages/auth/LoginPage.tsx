@@ -32,11 +32,24 @@ export const LoginPage: React.FC = () => {
 
     try {
       let token = 'mock_token_for_testing';
+      
+      // Mock dictionary for testing (since the real API is blocked/failing)
+      const mockUsers: Record<string, any> = {
+        '987': { name: 'Harshil', room: '409', phone: '9876543210', email: 'harshil@example.com', floor_id: 4 },
+        '123': { name: 'John Doe', room: '101', phone: '1234567890', email: 'john@example.com', floor_id: 1 }
+      };
+
+      const matchedUser = mockUsers[trimmedBankCode] || {
+        name: 'Test User ' + trimmedBankCode,
+        room: 'N/A',
+        phone: '0000000000',
+        email: 'test@example.com',
+        floor_id: 1
+      };
+
       let user: any = {
         role: trimmedBankCode.toLowerCase() === 'admin' ? 'ADMIN' : 'STUDENT',
-        name: 'Test User ' + trimmedBankCode,
-        room: '101',
-        phone: '0000000000'
+        ...matchedUser
       };
 
       try {
