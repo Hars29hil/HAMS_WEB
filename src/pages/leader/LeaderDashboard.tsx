@@ -3,7 +3,6 @@ import { LogOut, Users, Settings, Target } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
-import { DashboardView } from '../admin/views/DashboardView';
 import { StudentsView } from '../admin/views/StudentsView';
 import { FloorLeaderTargetView } from '../admin/views/FloorLeaderTargetView';
 
