@@ -1,219 +1,86 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, CheckCircle, Phone, Save } from 'lucide-react';
+import { LogOut, LayoutDashboard, Users, Settings, Target } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
-import { HamsCard } from '../../components/HamsCard';
-import './LeaderDashboard.css';
-
-interface AttendanceRecord {
-  student_code: string;
-  name: string;
-  rssi: number;
-  marked_at: string;
-  floor_name: string;
-}
-
-interface Student {
-  student_id: number;
-  student_code: string;
-  name: string;
-  assigned_mobile: string | null;
-}
+import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
+import { DashboardView } from '../admin/views/DashboardView';
+import { StudentsView } from '../admin/views/StudentsView';
+import { FloorLeaderTargetView } from '../admin/views/FloorLeaderTargetView';
 
 export const LeaderDashboard: React.FC = () => {
-  const { logout, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'attendance' | 'mobile'>('attendance');
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [mobileInputs, setMobileInputs] = useState<Record<number, string>>({});
+  const { logout } = useAuth();
+  const [activeView, setActiveView] = useState('dashboard');
+  const [dynamicSessions, setDynamicSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingMobile, setSavingMobile] = useState<number | null>(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchData();
+    fetchSessions();
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchSessions = async () => {
     try {
-      const [attendanceRes, studentsRes] = await Promise.all([
-        apiClient.get('/attendance/live'),
-        apiClient.get('/students')
-      ]);
-
-      if (attendanceRes.data.success) {
-        setRecords(attendanceRes.data.records || []);
+      const response = await apiClient.get('/students/sessions');
+      if (response.data.success) {
+        setDynamicSessions(response.data.data);
       }
-      
-      if (studentsRes.data.success) {
-        const fetchedStudents = studentsRes.data.data || [];
-        setStudents(fetchedStudents);
-        
-        // Initialize inputs
-        const initialInputs: Record<number, string> = {};
-        fetchedStudents.forEach((s: Student) => {
-          initialInputs[s.student_id] = s.assigned_mobile || '';
-        });
-        setMobileInputs(initialInputs);
-      }
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        logout();
-      }
-      setError(err.message || 'Error loading dashboard');
+    } catch (err) {
+      console.error('Error fetching sessions', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleMobileInputChange = (studentId: number, value: string) => {
-    setMobileInputs(prev => ({ ...prev, [studentId]: value }));
-  };
+  const getSidebarItems = (): SidebarItem[] => {
+    let items: SidebarItem[] = [
+      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'students', label: 'My Floor Students', icon: Users },
+    ];
 
-  const handleAssignMobile = async (studentId: number) => {
-    const mobile = mobileInputs[studentId];
-    setSavingMobile(studentId);
-    try {
-      const response = await apiClient.put(`/students/${studentId}/mobile`, { assigned_mobile: mobile });
-      if (response.data.success) {
-        setStudents(prev => prev.map(s => s.student_id === studentId ? { ...s, assigned_mobile: mobile } : s));
-        alert('Mobile number assigned successfully');
-      } else {
-        alert(response.data.message || 'Failed to assign mobile');
-      }
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error assigning mobile');
-    } finally {
-      setSavingMobile(null);
-    }
+    dynamicSessions.forEach(session => {
+      items.push({
+        id: `target_${session.session_key}`,
+        label: `${session.session_name} Targets`,
+        icon: Target,
+      });
+    });
+
+    items.push({ id: 'settings', label: 'Settings', icon: Settings });
+
+    return items;
   };
 
   if (loading) {
     return <div className="loading-screen"><div className="spinner"></div></div>;
   }
 
-  if (error) {
-    return (
-      <div className="error-screen">
-        <HamsCard padding="2rem">
-          <h3>Error Loading Dashboard</h3>
-          <p>{error}</p>
-          <button onClick={logout} className="logout-btn">Log Out</button>
-        </HamsCard>
-      </div>
-    );
-  }
+  const renderActiveView = () => {
+    if (activeView === 'dashboard') return <DashboardView />;
+    if (activeView === 'students') return <StudentsView />;
+    if (activeView.startsWith('target_')) {
+      const sessionKey = activeView.replace('target_', '');
+      return <FloorLeaderTargetView sessionType={sessionKey} />;
+    }
+    return <div style={{ padding: '24px' }}><h3>Work in Progress: {activeView}</h3></div>;
+  };
+
+  const currentItem = getSidebarItems().find(item => item.id === activeView);
 
   return (
-    <div className="leader-container">
-      <header className="leader-header glass">
-        <h2>{user?.name || 'Floor Leader'} Dashboard</h2>
-        <button className="logout-btn" onClick={logout}>
-          <LogOut size={20} />
-        </button>
-      </header>
-
-      <div className="leader-content">
-        <div className="leader-tabs">
-          <button 
-            className={`tab-btn ${activeTab === 'attendance' ? 'active' : ''}`}
-            onClick={() => setActiveTab('attendance')}
-          >
-            Live Attendance
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+      <Sidebar 
+        items={getSidebarItems()} 
+        activeId={activeView} 
+        onSelect={setActiveView} 
+      />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--color-bg)' }}>
+        <header className="glass" style={{ padding: '16px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 5 }}>
+          <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Floor Leader'}</h2>
+          <button className="logout-btn" onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', cursor: 'pointer' }}>
+            <LogOut size={16} />
+            Logout
           </button>
-          <button 
-            className={`tab-btn ${activeTab === 'mobile' ? 'active' : ''}`}
-            onClick={() => setActiveTab('mobile')}
-          >
-            Assign Mobile
-          </button>
-        </div>
-
-        {activeTab === 'attendance' && (
-          <>
-            <p className="subtitle">Live Attendance for Floor {user?.floor_id}</p>
-            
-            {/* KPI Grid */}
-            <div className="kpi-grid">
-              <HamsCard padding="1.5rem" className="kpi-card">
-                <div className="kpi-icon green"><CheckCircle size={24} /></div>
-                <div className="kpi-info">
-                  <span className="kpi-label">Present</span>
-                  <span className="kpi-value">{records.length}</span>
-                </div>
-              </HamsCard>
-            </div>
-
-            <div className="dashboard-main">
-              <HamsCard padding="1.5rem" className="records-section">
-                <h3 className="section-title">Recent Marks</h3>
-                <div className="records-list">
-                  {records.length === 0 ? (
-                    <div className="empty-state">No students have marked attendance yet.</div>
-                  ) : (
-                    records.map((r, i) => (
-                      <div className="record-row" key={i}>
-                        <div className="record-info">
-                          <h4>{r.name} ({r.student_code})</h4>
-                          <p className="record-time">{new Date(r.marked_at).toLocaleTimeString()}</p>
-                        </div>
-                        <div className="record-badge">
-                          <span className="status-dot online"></span>
-                          Present
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </HamsCard>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'mobile' && (
-          <div className="dashboard-main">
-            <HamsCard padding="1.5rem" className="records-section">
-              <h3 className="section-title">Assign Login Mobile Number</h3>
-              <p className="section-desc">Assign a mobile number to students so they can auto-login via their SIM card.</p>
-              
-              <div className="records-list">
-                {students.length === 0 ? (
-                  <div className="empty-state">No students found on this floor.</div>
-                ) : (
-                  students.map((s) => (
-                    <div className="record-row mobile-assign-row" key={s.student_id}>
-                      <div className="record-info">
-                        <h4>{s.name}</h4>
-                        <p className="record-time">Bank Code: {s.student_code}</p>
-                      </div>
-                      <div className="mobile-input-group">
-                        <div className="input-wrapper">
-                          <Phone size={16} className="input-icon" />
-                          <input 
-                            type="text" 
-                            placeholder="e.g. 9876543210" 
-                            value={mobileInputs[s.student_id] || ''}
-                            onChange={(e) => handleMobileInputChange(s.student_id, e.target.value)}
-                          />
-                        </div>
-                        <button 
-                          className="save-btn" 
-                          onClick={() => handleAssignMobile(s.student_id)}
-                          disabled={savingMobile === s.student_id}
-                        >
-                          <Save size={16} />
-                          {savingMobile === s.student_id ? 'Saving...' : 'Save'}
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </HamsCard>
-          </div>
-        )}
-
+        </header>
+        {renderActiveView()}
       </div>
     </div>
   );

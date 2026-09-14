@@ -1,153 +1,101 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, Users, CheckCircle, Clock, XCircle } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { LogOut, LayoutDashboard, Users, BarChart3, Clock, UserPlus, FileSpreadsheet, Settings } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
-import { HamsCard } from '../../components/HamsCard';
-import './AdminDashboard.css';
+import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
+import { DashboardView } from './views/DashboardView';
+import { StudentsView } from './views/StudentsView';
+import { StudentAttendanceView } from './views/StudentAttendanceView';
+import { LiveAttendanceView } from './views/LiveAttendanceView';
+import { AddAttendanceView } from './views/AddAttendanceView';
 
 export const AdminDashboard: React.FC = () => {
   const { logout } = useAuth();
-  const [stats, setStats] = useState<any>(null);
+  const [activeView, setActiveView] = useState('dashboard');
+  const [dynamicSessions, setDynamicSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchStats();
+    fetchSessions();
   }, []);
 
-  const fetchStats = async () => {
+  const fetchSessions = async () => {
     try {
-      const response = await apiClient.get('/admin/dashboard');
+      const response = await apiClient.get('/students/sessions');
       if (response.data.success) {
-        setStats(response.data.data);
-      } else {
-        setError(response.data.message || 'Failed to load stats');
+        setDynamicSessions(response.data.data);
       }
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        logout();
-      }
-      setError(err.message || 'Error loading dashboard');
+    } catch (err) {
+      console.error('Error fetching sessions', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const getIcon = (name: string) => {
+    switch (name) {
+      case 'users': return Users;
+      case 'activity': return BarChart3;
+      default: return Clock;
+    }
+  };
+
+  const getSidebarItems = (): SidebarItem[] => {
+    let items: SidebarItem[] = [
+      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'students', label: 'Student Management', icon: Users },
+      { id: 'attendance_history', label: 'Student Attendance', icon: FileSpreadsheet },
+    ];
+
+    dynamicSessions.forEach(session => {
+      items.push({
+        id: `session_${session.session_key}`,
+        label: session.session_name,
+        icon: getIcon(session.icon_name),
+      });
+    });
+
+    items.push({ id: 'add_attendance', label: '+ Add Attendance', icon: UserPlus });
+    items.push({ id: 'settings', label: 'Settings', icon: Settings });
+
+    return items;
   };
 
   if (loading) {
     return <div className="loading-screen"><div className="spinner"></div></div>;
   }
 
-  if (error || !stats) {
-    return (
-      <div className="error-screen">
-        <HamsCard padding="2rem">
-          <h3>Error Loading Dashboard</h3>
-          <p>{error}</p>
-          <button onClick={logout} className="logout-btn">Log Out</button>
-        </HamsCard>
-      </div>
-    );
-  }
+  const renderActiveView = () => {
+    if (activeView === 'dashboard') return <DashboardView />;
+    if (activeView === 'students') return <StudentsView />;
+    if (activeView === 'attendance_history') return <StudentAttendanceView />;
+    if (activeView === 'add_attendance') return <AddAttendanceView onAdded={fetchSessions} />;
+    if (activeView.startsWith('session_')) {
+      const sessionKey = activeView.replace('session_', '');
+      const session = dynamicSessions.find(s => s.session_key === sessionKey);
+      return <LiveAttendanceView sessionKey={sessionKey} sessionName={session?.session_name || 'Session'} onChanged={fetchSessions} />;
+    }
+    return <div style={{ padding: '24px' }}><h3>Work in Progress: {activeView}</h3></div>;
+  };
 
-  // Format chart data
-  const chartData = (stats.weekly_stats || []).map((s: any) => ({
-    name: new Date(s.date).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }),
-    present: s.present,
-    late: s.late,
-  }));
+  const currentItem = getSidebarItems().find(item => item.id === activeView);
 
   return (
-    <div className="admin-container">
-      <header className="admin-header glass">
-        <h2>Admin Dashboard</h2>
-        <button className="logout-btn" onClick={logout}>
-          <LogOut size={20} />
-        </button>
-      </header>
-
-      <div className="admin-content">
-        <p className="subtitle">Here's what's happening in your hostel today</p>
-        
-        {/* KPI Grid */}
-        <div className="kpi-grid">
-          <HamsCard padding="1.5rem" className="kpi-card">
-            <div className="kpi-icon blue"><Users size={24} /></div>
-            <div className="kpi-info">
-              <span className="kpi-label">Total Students</span>
-              <span className="kpi-value">{stats.total_students}</span>
-            </div>
-          </HamsCard>
-          <HamsCard padding="1.5rem" className="kpi-card">
-            <div className="kpi-icon green"><CheckCircle size={24} /></div>
-            <div className="kpi-info">
-              <span className="kpi-label">Present Today</span>
-              <span className="kpi-value">{stats.present_today}</span>
-            </div>
-          </HamsCard>
-          <HamsCard padding="1.5rem" className="kpi-card">
-            <div className="kpi-icon orange"><Clock size={24} /></div>
-            <div className="kpi-info">
-              <span className="kpi-label">Late</span>
-              <span className="kpi-value">{stats.late_today}</span>
-            </div>
-          </HamsCard>
-          <HamsCard padding="1.5rem" className="kpi-card">
-            <div className="kpi-icon red"><XCircle size={24} /></div>
-            <div className="kpi-info">
-              <span className="kpi-label">Absent</span>
-              <span className="kpi-value">{stats.absent_today}</span>
-            </div>
-          </HamsCard>
-        </div>
-
-        <div className="dashboard-main">
-          {/* Chart Section */}
-          <HamsCard padding="1.5rem" className="chart-section">
-            <h3 className="section-title">Attendance Overview (Last 7 Days)</h3>
-            <div className="chart-wrapper">
-              {chartData.length === 0 ? (
-                <div className="empty-state">No data available</div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                    <XAxis dataKey="name" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip cursor={{fill: 'rgba(255,255,255,0.05)'}} contentStyle={{backgroundColor: 'var(--color-bg-elevated)', border: 'none', borderRadius: '8px'}} />
-                    <Bar dataKey="present" fill="var(--color-success)" radius={[4, 4, 0, 0]} barSize={16} />
-                    <Bar dataKey="late" fill="var(--color-warning)" radius={[4, 4, 0, 0]} barSize={16} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </HamsCard>
-
-          {/* Floor Status */}
-          <HamsCard padding="1.5rem" className="floor-section">
-            <h3 className="section-title">Live Floor Status</h3>
-            <div className="floor-list">
-              {(stats.floor_status || []).length === 0 ? (
-                <div className="empty-state">No floor data available</div>
-              ) : (
-                (stats.floor_status || []).map((floor: any, i: number) => (
-                  <div className="floor-row" key={i}>
-                    <div className="floor-info">
-                      <h4>{floor.floor_name}</h4>
-                      <p className="floor-sub">Attendance {floor.session_status}</p>
-                      <p className="floor-sub">{floor.present_students} / {floor.total_students} students</p>
-                    </div>
-                    <div className="floor-badge">
-                      <span className={`status-dot ${floor.session_status === 'Active' ? 'online' : 'offline'}`}></span>
-                      {floor.session_status === 'Active' ? 'Online' : 'Offline'}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </HamsCard>
-        </div>
-
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+      <Sidebar 
+        items={getSidebarItems()} 
+        activeId={activeView} 
+        onSelect={setActiveView} 
+      />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--color-bg)' }}>
+        <header className="glass" style={{ padding: '16px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 5 }}>
+          <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Admin'}</h2>
+          <button className="logout-btn" onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', cursor: 'pointer' }}>
+            <LogOut size={16} />
+            Logout
+          </button>
+        </header>
+        {renderActiveView()}
       </div>
     </div>
   );

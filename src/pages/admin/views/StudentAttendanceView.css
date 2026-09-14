@@ -1,0 +1,147 @@
+.attendance-view-container {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.attendance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.attendance-header h2 {
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 0 8px 0;
+  color: var(--color-text);
+}
+
+.attendance-header p {
+  color: var(--color-text-muted);
+  margin: 0;
+  font-size: 15px;
+}
+
+.filters-card {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.filters-card h4 {
+  margin: 0 0 12px 0;
+  color: var(--color-text);
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-chip.active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
+.attendance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.attendance-row-card {
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.attendance-row-header {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.attendance-row-header:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.row-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.row-info h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.bank-code-badge {
+  background: rgba(183, 161, 245, 0.1);
+  color: var(--color-accent);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.group-badge {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.row-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--color-text-muted);
+}
+
+.stats-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.stats-text .percentage {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.stats-text .count {
+  font-size: 12px;
+}
+
+.attendance-row-details {
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.1);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.breakdown-item .type-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
