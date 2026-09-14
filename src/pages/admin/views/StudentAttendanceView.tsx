@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Filter, ChevronDown, ChevronUp } from 'lucide-react';
-import axios from 'axios';
 import apiClient from '../../../services/apiClient';
 import { HamsCard } from '../../../components/HamsCard';
 import './StudentAttendanceView.css';
@@ -25,12 +24,10 @@ export const StudentAttendanceView: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Students
-      const studentRes = await axios.get('https://api.avdvvn.org/public/getStudentBasicDetails', {
-        headers: { 'x-hsh-auth-token': 'aF92Kx7QmN4Lp8Vz' }
-      });
+      // 1. Fetch Students from internal DB
+      const studentRes = await apiClient.get('/students');
       let groups = new Set<string>();
-      if (studentRes.data?.data) {
+      if (studentRes.data?.success) {
         setAllStudents(studentRes.data.data);
         studentRes.data.data.forEach((s: any) => {
           if (s.group) groups.add(s.group.trim());
@@ -73,7 +70,7 @@ export const StudentAttendanceView: React.FC = () => {
         return;
       }
 
-      const bankCodeStr = String(student.bankCode || '');
+      const bankCodeStr = String(student.student_code || '');
       let studentRecords = reportData.studentRecords || {};
       let record = studentRecords[bankCodeStr];
       
@@ -105,7 +102,7 @@ export const StudentAttendanceView: React.FC = () => {
 
       filteredList.push({
         bankCode: bankCodeStr,
-        name: student.firstName || 'Unknown',
+        name: student.name || 'Unknown',
         group: studentGroup,
         attended,
         total: totalPossible,
