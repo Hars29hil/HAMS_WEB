@@ -176,6 +176,11 @@
   pointer-events: none;
 }
 
+.input-wrap.select-wrap select option {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
 .arrow-icon {
   color: var(--color-text-muted);
 }
