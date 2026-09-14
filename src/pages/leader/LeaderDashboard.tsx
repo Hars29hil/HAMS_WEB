@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, LayoutDashboard, Users, Settings, Target } from 'lucide-react';
+import { LogOut, Users, Settings, Target } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
@@ -9,7 +9,7 @@ import { FloorLeaderTargetView } from '../admin/views/FloorLeaderTargetView';
 
 export const LeaderDashboard: React.FC = () => {
   const { logout } = useAuth();
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState('students');
   const [dynamicSessions, setDynamicSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,14 +32,13 @@ export const LeaderDashboard: React.FC = () => {
 
   const getSidebarItems = (): SidebarItem[] => {
     let items: SidebarItem[] = [
-      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'students', label: 'My Floor Students', icon: Users },
     ];
 
     dynamicSessions.forEach(session => {
       items.push({
         id: `target_${session.session_key}`,
-        label: `${session.session_name} Targets`,
+        label: session.session_name,
         icon: Target,
       });
     });
@@ -54,7 +53,6 @@ export const LeaderDashboard: React.FC = () => {
   }
 
   const renderActiveView = () => {
-    if (activeView === 'dashboard') return <DashboardView />;
     if (activeView === 'students') return <StudentsView />;
     if (activeView.startsWith('target_')) {
       const sessionKey = activeView.replace('target_', '');

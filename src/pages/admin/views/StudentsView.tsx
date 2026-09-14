@@ -14,6 +14,7 @@ export const StudentsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFloor, setSelectedFloor] = useState<string>('All');
   const [assignmentFilter, setAssignmentFilter] = useState<string>('All');
+  const [mobileModal, setMobileModal] = useState<{ isOpen: boolean, studentId: string, currentMobile: string } | null>(null);
 
   const userRole = user?.role || 'ADMIN';
 
@@ -165,8 +166,7 @@ export const StudentsView: React.FC = () => {
 
                   <div className="student-actions">
                     <button className="action-btn" onClick={() => {
-                      const m = window.prompt("Enter mobile number:", student.assigned_mobile || '');
-                      if (m !== null) assignMobile(student.student_id, m);
+                      setMobileModal({ isOpen: true, studentId: student.student_id, currentMobile: student.assigned_mobile || '' });
                     }}>
                       <Phone size={16} /> Assign Mobile
                     </button>
@@ -185,6 +185,29 @@ export const StudentsView: React.FC = () => {
               </HamsCard>
             );
           })}
+        </div>
+      )}
+
+      {mobileModal?.isOpen && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal">
+            <h3>Assign Mobile Number</h3>
+            <p>Enter the mobile number for this student.</p>
+            <input 
+              type="text" 
+              value={mobileModal.currentMobile}
+              onChange={(e) => setMobileModal({ ...mobileModal, currentMobile: e.target.value })}
+              placeholder="e.g. 9876543210"
+              autoFocus
+            />
+            <div className="custom-modal-actions">
+              <button className="btn-cancel" onClick={() => setMobileModal(null)}>Cancel</button>
+              <button className="btn-save" onClick={() => {
+                assignMobile(mobileModal.studentId, mobileModal.currentMobile);
+                setMobileModal(null);
+              }}>Save</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
