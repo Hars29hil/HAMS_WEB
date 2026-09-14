@@ -195,14 +195,24 @@ export const LiveAttendanceView: React.FC<LiveAttendanceViewProps> = ({ sessionK
           <div className="time-field">
             <label>Start Time</label>
             <div className="input-wrap">
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+              <input 
+                type="time" 
+                value={startTime} 
+                onChange={e => setStartTime(e.target.value)}
+                onClick={(e) => (e.target as HTMLInputElement).showPicker && (e.target as HTMLInputElement).showPicker()}
+              />
             </div>
           </div>
           <ArrowRight className="arrow-icon" size={24} />
           <div className="time-field">
             <label>End Time</label>
             <div className="input-wrap">
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+              <input 
+                type="time" 
+                value={endTime} 
+                onChange={e => setEndTime(e.target.value)}
+                onClick={(e) => (e.target as HTMLInputElement).showPicker && (e.target as HTMLInputElement).showPicker()}
+              />
             </div>
           </div>
         </div>

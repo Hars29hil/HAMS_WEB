@@ -154,6 +154,8 @@
   font-size: 18px;
   font-weight: 700;
   outline: none;
+  color-scheme: dark;
+  cursor: pointer;
 }
 
 .input-wrap.select-wrap select {
