@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, LayoutDashboard, Users, BarChart3, Clock, UserPlus, FileSpreadsheet, Settings } from 'lucide-react';
+import { LogOut, LayoutDashboard, Users, BarChart3, Clock, UserPlus, FileSpreadsheet, Settings, MessageSquare, Bell } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
@@ -8,6 +8,7 @@ import { StudentsView } from './views/StudentsView';
 import { StudentAttendanceView } from './views/StudentAttendanceView';
 import { LiveAttendanceView } from './views/LiveAttendanceView';
 import { AddAttendanceView } from './views/AddAttendanceView';
+import { MessageView } from './views/MessageView';
 
 export const AdminDashboard: React.FC = () => {
   const { logout } = useAuth();
@@ -56,6 +57,8 @@ export const AdminDashboard: React.FC = () => {
     });
 
     items.push({ id: 'add_attendance', label: '+ Add Attendance', icon: UserPlus });
+    items.push({ id: 'message', label: 'Message', icon: MessageSquare });
+    items.push({ id: 'notifications', label: 'Notifications', icon: Bell });
     items.push({ id: 'settings', label: 'Settings', icon: Settings });
 
     return items;
@@ -70,6 +73,7 @@ export const AdminDashboard: React.FC = () => {
     if (activeView === 'students') return <StudentsView />;
     if (activeView === 'attendance_history') return <StudentAttendanceView />;
     if (activeView === 'add_attendance') return <AddAttendanceView onAdded={fetchSessions} />;
+    if (activeView === 'message') return <MessageView />;
     if (activeView.startsWith('session_')) {
       const sessionKey = activeView.replace('session_', '');
       const session = dynamicSessions.find(s => s.session_key === sessionKey);
