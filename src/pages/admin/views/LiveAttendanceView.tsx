@@ -19,6 +19,16 @@ export const LiveAttendanceView: React.FC<LiveAttendanceViewProps> = ({ sessionK
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [activeTab, setActiveTab] = useState(0);
+  
+  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [attendanceStudents, setAttendanceStudents] = useState<any[]>([]);
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState('All');
+  
+  const [absentStudents, setAbsentStudents] = useState<any[]>([]);
+  const [absentDate, setAbsentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [justificationModal, setJustificationModal] = useState<{isOpen: boolean, studentId: string, currentReason: string} | null>(null);
+
   useEffect(() => {
     fetchSchedule();
   }, [sessionKey]);
@@ -148,6 +158,69 @@ export const LiveAttendanceView: React.FC<LiveAttendanceViewProps> = ({ sessionK
     }
   };
 
+  const fetchAttendance = async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get(`/attendance/session/${sessionKey}/students?date=${attendanceDate}`);
+      if (res.data.success) {
+        setAttendanceStudents(res.data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markManual = async (studentId: string) => {
+    try {
+      await apiClient.post('/attendance/mark-manual', {
+        session_key: sessionKey,
+        student_code: studentId,
+        date: attendanceDate
+      });
+      alert('Marked manually');
+      fetchAttendance();
+    } catch (e) {
+      alert('Failed to mark manually');
+    }
+  };
+
+  const fetchAbsent = async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get(`/attendance/session/${sessionKey}/absent-reasons?date=${absentDate}`);
+      if (res.data.success) {
+        setAbsentStudents(res.data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const justifyAbsence = async (studentId: string, reason: string) => {
+    try {
+      await apiClient.post(`/attendance/session/absent-reason`, {
+        session_key: sessionKey,
+        student_code: studentId,
+        date: absentDate,
+        reason: reason
+      });
+      alert('Reason saved');
+      setJustificationModal(null);
+      fetchAbsent();
+    } catch (e) {
+      alert('Failed to save reason');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 1) fetchAttendance();
+    if (activeTab === 2) fetchAbsent();
+  }, [activeTab, attendanceDate, absentDate, sessionKey]);
+
   const formatTime = (time24: string) => {
     if (!time24) return '';
     const [h, m] = time24.split(':').map(Number);
@@ -175,15 +248,23 @@ export const LiveAttendanceView: React.FC<LiveAttendanceViewProps> = ({ sessionK
         </div>
       </div>
 
-      <div className={`status-banner ${isOpen ? 'open' : 'closed'}`}>
-        <div className="status-icon">
-          {isOpen ? <CheckCircle size={24} /> : <XCircle size={24} />}
-        </div>
-        <div className="status-text">
-          <h3>Attendance is {isOpen ? 'OPEN' : 'CLOSED'}</h3>
-          {isOpen && <p>Window: {formatTime(startTime)} – {formatTime(endTime)}</p>}
-        </div>
+      <div className="tabs-header" style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+        <button className={`tab-btn ${activeTab === 0 ? 'active' : ''}`} onClick={() => setActiveTab(0)}>Set Timing</button>
+        <button className={`tab-btn ${activeTab === 1 ? 'active' : ''}`} onClick={() => setActiveTab(1)}>View Attendance</button>
+        <button className={`tab-btn ${activeTab === 2 ? 'active' : ''}`} onClick={() => setActiveTab(2)}>Report Verification</button>
       </div>
+
+      {activeTab === 0 && (
+        <>
+          <div className={`status-banner ${isOpen ? 'open' : 'closed'}`}>
+            <div className="status-icon">
+              {isOpen ? <CheckCircle size={24} /> : <XCircle size={24} />}
+            </div>
+            <div className="status-text">
+              <h3>Attendance is {isOpen ? 'OPEN' : 'CLOSED'}</h3>
+              {isOpen && <p>Window: {formatTime(startTime)} – {formatTime(endTime)}</p>}
+            </div>
+          </div>
 
       <HamsCard padding="32px" className="schedule-card">
         <div className="card-section-header">
@@ -258,6 +339,102 @@ export const LiveAttendanceView: React.FC<LiveAttendanceViewProps> = ({ sessionK
           <Download size={18} /> Export Today's Attendance (CSV)
         </button>
       </HamsCard>
+        </>
+      )}
+
+      {activeTab === 1 && (
+         <HamsCard padding="24px">
+           <div style={{display: 'flex', gap: '16px', marginBottom: '24px'}}>
+             <input type="date" className="filter-select" value={attendanceDate} onChange={e => setAttendanceDate(e.target.value)} />
+             <select className="filter-select" value={attendanceStatusFilter} onChange={e => setAttendanceStatusFilter(e.target.value)}>
+               <option value="All">All</option>
+               <option value="Present">Present</option>
+               <option value="Absent">Absent</option>
+               <option value="Late">Late</option>
+             </select>
+           </div>
+           
+           <table className="students-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th style={{ padding: '12px' }}>Code</th>
+                  <th style={{ padding: '12px' }}>Name</th>
+                  <th style={{ padding: '12px' }}>Status</th>
+                  <th style={{ padding: '12px' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceStudents.filter(s => attendanceStatusFilter === 'All' || s.status === attendanceStatusFilter).map(s => (
+                  <tr key={s.student_code} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td style={{ padding: '12px' }}>{s.student_code}</td>
+                    <td style={{ padding: '12px' }}>{s.name}</td>
+                    <td style={{ padding: '12px' }}>{s.status}</td>
+                    <td style={{ padding: '12px' }}>
+                      {s.status !== 'Present' && (
+                        <button className="action-btn" onClick={() => markManual(s.student_code)}>Mark Manual</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {attendanceStudents.length === 0 && (
+                  <tr><td colSpan={4} style={{ padding: '12px', textAlign: 'center' }}>No students found.</td></tr>
+                )}
+              </tbody>
+           </table>
+         </HamsCard>
+      )}
+
+      {activeTab === 2 && (
+         <HamsCard padding="24px">
+           <div style={{marginBottom: '24px'}}>
+             <input type="date" className="filter-select" value={absentDate} onChange={e => setAbsentDate(e.target.value)} />
+           </div>
+           
+           <table className="students-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th style={{ padding: '12px' }}>Code</th>
+                  <th style={{ padding: '12px' }}>Name</th>
+                  <th style={{ padding: '12px' }}>Reason</th>
+                  <th style={{ padding: '12px' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {absentStudents.map(s => (
+                  <tr key={s.student_code} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td style={{ padding: '12px' }}>{s.student_code}</td>
+                    <td style={{ padding: '12px' }}>{s.name}</td>
+                    <td style={{ padding: '12px' }}>{s.reason || 'None'}</td>
+                    <td style={{ padding: '12px' }}>
+                      <button className="action-btn" onClick={() => setJustificationModal({isOpen: true, studentId: s.student_code, currentReason: s.reason || ''})}>Justify</button>
+                    </td>
+                  </tr>
+                ))}
+                {absentStudents.length === 0 && (
+                  <tr><td colSpan={4} style={{ padding: '12px', textAlign: 'center' }}>No absent students found.</td></tr>
+                )}
+              </tbody>
+           </table>
+         </HamsCard>
+      )}
+
+      {justificationModal?.isOpen && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal">
+            <h3 style={{ margin: '0 0 10px' }}>Justify Absence</h3>
+            <textarea 
+               style={{ width: '100%', height: '80px', padding: '8px', border: '1px solid var(--color-border)', borderRadius: '4px', backgroundColor: 'var(--color-bg-elevated)', color: 'var(--color-text)' }}
+               value={justificationModal.currentReason} 
+               onChange={e => setJustificationModal({...justificationModal, currentReason: e.target.value})} 
+               placeholder="Enter reason..."
+            />
+            <div className="custom-modal-actions" style={{ marginTop: '15px' }}>
+              <button className="btn-cancel" onClick={() => setJustificationModal(null)}>Cancel</button>
+              <button className="btn-save" onClick={() => justifyAbsence(justificationModal.studentId, justificationModal.currentReason)}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Filter, ChevronDown, ChevronUp } from 'lucide-react';
+import { Download, Filter, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import axios from 'axios';
 import apiClient from '../../../services/apiClient';
 import { HamsCard } from '../../../components/HamsCard';
@@ -18,36 +18,44 @@ export const StudentAttendanceView: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [timeFilter, setTimeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [timeFilter]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
       // 1. Fetch Students from external API
-      const studentRes = await axios.get('https://api.avdvvn.org/public/getStudentBasicDetails', {
-        headers: { 'x-hsh-auth-token': 'aF92Kx7QmN4Lp8Vz' }
-      });
-      let groups = new Set<string>();
-      if (studentRes.data?.data) {
-        setAllStudents(studentRes.data.data);
-        studentRes.data.data.forEach((s: any) => {
-          if (s.group) groups.add(s.group.trim());
+      if (allStudents.length === 0) {
+        const studentRes = await axios.get('https://api.avdvvn.org/public/getStudentBasicDetails', {
+          headers: { 'x-hsh-auth-token': 'aF92Kx7QmN4Lp8Vz' }
         });
-        setAllGroups(Array.from(groups).sort());
+        let groups = new Set<string>();
+        if (studentRes.data?.data) {
+          setAllStudents(studentRes.data.data);
+          studentRes.data.data.forEach((s: any) => {
+            if (s.group) groups.add(s.group.trim());
+          });
+          setAllGroups(Array.from(groups).sort());
+        }
       }
 
       // 2. Fetch Sessions
-      const sessionRes = await apiClient.get('/admin/sessions');
-      if (sessionRes.data?.success) {
-        const types = sessionRes.data.data.map((s: any) => s.session_key);
-        setAllTypes(types);
-        setSelectedTypes(types);
+      if (allTypes.length === 0) {
+        const sessionRes = await apiClient.get('/admin/sessions');
+        if (sessionRes.data?.success) {
+          const types = sessionRes.data.data.map((s: any) => s.session_key);
+          setAllTypes(types);
+          setSelectedTypes(types);
+        }
       }
 
       // 3. Fetch Reports
-      const reportRes = await apiClient.get('/admin/reports');
+      const reportRes = await apiClient.get(`/admin/reports?time_filter=${timeFilter}`);
       if (reportRes.data?.success) {
         setReportData(reportRes.data);
       }
@@ -74,6 +82,10 @@ export const StudentAttendanceView: React.FC = () => {
       }
 
       const bankCodeStr = String(student.bankCode || '');
+      
+      const nameMatch = (student.firstName || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const bankMatch = bankCodeStr.toLowerCase().includes(searchQuery.toLowerCase());
+      if (searchQuery && !nameMatch && !bankMatch) return;
 
       let studentRecords = reportData.studentRecords || {};
       let record = studentRecords[bankCodeStr];
@@ -94,6 +106,24 @@ export const StudentAttendanceView: React.FC = () => {
           attended += (record[type] || 0);
         });
       }
+      
+      let lateCount = 0;
+      const lateRecords = reportData.lateRecords || {};
+      let lateRecord = lateRecords[bankCodeStr];
+      if (!lateRecord) {
+        const stripped = bankCodeStr.replace(/^0+/, '');
+        for (let k in lateRecords) {
+          if (k.replace(/^0+/, '') === stripped) {
+            lateRecord = lateRecords[k];
+            break;
+          }
+        }
+      }
+      lateCount = lateRecord || 0;
+
+      if (statusFilter === 'present' && attended === 0) return;
+      if (statusFilter === 'absent' && attended > 0) return;
+      if (statusFilter === 'late' && lateCount === 0) return;
 
       const percentage = totalPossible > 0 ? (attended / totalPossible) * 100 : 0;
       let breakdown: any = {};
@@ -154,6 +184,16 @@ export const StudentAttendanceView: React.FC = () => {
           <p>Overall attendance records and reports.</p>
         </div>
         <div className="header-actions">
+          <div className="search-box" style={{ display: 'flex', alignItems: 'center', backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '0 12px' }}>
+            <Search size={18} className="search-icon" color="var(--color-text-muted)" />
+            <input 
+              type="text" 
+              placeholder="Search Name/Code..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{ border: 'none', background: 'transparent', padding: '8px', outline: 'none', color: 'var(--color-text)', width: '200px' }}
+            />
+          </div>
           <button className="action-btn" onClick={() => setShowFilters(!showFilters)}>
             <Filter size={18} /> Filters
           </button>
@@ -165,7 +205,33 @@ export const StudentAttendanceView: React.FC = () => {
 
       {showFilters && (
         <HamsCard padding="20px" className="filters-card">
-          <h4>Session Types</h4>
+          <h4>Time Filter</h4>
+          <div className="chip-list">
+            {['all', 'today'].map(t => (
+              <div 
+                key={t}
+                className={`filter-chip ${timeFilter === t ? 'active' : ''}`}
+                onClick={() => setTimeFilter(t)}
+              >
+                {t.toUpperCase()}
+              </div>
+            ))}
+          </div>
+          
+          <h4 style={{ marginTop: '20px' }}>Status Filter</h4>
+          <div className="chip-list">
+            {['all', 'present', 'absent', 'late'].map(s => (
+              <div 
+                key={s}
+                className={`filter-chip ${statusFilter === s ? 'active' : ''}`}
+                onClick={() => setStatusFilter(s)}
+              >
+                {s.toUpperCase()}
+              </div>
+            ))}
+          </div>
+
+          <h4 style={{ marginTop: '20px' }}>Session Types</h4>
           <div className="chip-list">
             {allTypes.map(type => (
               <div 

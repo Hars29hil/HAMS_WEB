@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Users, Bell, Clock, BarChart3 } from 'lucide-react';
+import { LogOut, Users, Bell, Clock, BarChart3, Menu } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
 import { StudentsView } from '../admin/views/StudentsView';
@@ -11,6 +11,7 @@ export const LeaderDashboard: React.FC = () => {
   const [activeView, setActiveView] = useState('students');
   const [dynamicSessions, setDynamicSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetchSessions();
@@ -74,11 +75,18 @@ export const LeaderDashboard: React.FC = () => {
       <Sidebar 
         items={getSidebarItems()} 
         activeId={activeView} 
-        onSelect={setActiveView} 
+        onSelect={(id) => { setActiveView(id); setIsSidebarOpen(false); }}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
       <div className="main-content">
-        <header className="top-header" style={{ padding: '16px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 10, background: 'var(--color-bg)' }}>
-          <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Dashboard'}</h2>
+        <header className="top-header">
+          <div className="header-left">
+            <button className="menu-btn" onClick={() => setIsSidebarOpen(true)}>
+              <Menu size={24} />
+            </button>
+            <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Dashboard'}</h2>
+          </div>
           <button className="logout-btn" onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', cursor: 'pointer' }}>
             <LogOut size={16} /> Logout
           </button>

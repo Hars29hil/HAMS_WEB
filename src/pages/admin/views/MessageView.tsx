@@ -443,7 +443,7 @@ export const MessageView: React.FC = () => {
                     <td>{s.bankCode}</td>
                     <td>{s.name}</td>
                     <td>{s.roomNumber}</td>
-                    <td>{s.phone}</td>
+                    <td><a href={`tel:${s.phone}`} style={{ color: 'var(--color-primary)', textDecoration: 'none' }}>{s.phone}</a></td>
                     <td>{s.overallPercentage.toFixed(1)}%</td>
                   </tr>
                 );

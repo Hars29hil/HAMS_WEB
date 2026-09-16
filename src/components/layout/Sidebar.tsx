@@ -1,5 +1,5 @@
 import React from 'react';
-import { LucideIcon } from 'lucide-react';
+import { LucideIcon, X } from 'lucide-react';
 import './Sidebar.css';
 
 export interface SidebarItem {
@@ -14,15 +14,24 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   title?: string;
   subtitle?: string;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, title = "HAMS", subtitle = "Hostel Management" }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, title = "HAMS", subtitle = "Hostel Management", isOpen = false, onClose }) => {
   return (
-    <aside className="sidebar-container glass">
-      <div className="sidebar-header">
-        <h2 className="sidebar-title">{title}</h2>
-        {subtitle && <p className="sidebar-subtitle">{subtitle}</p>}
-      </div>
+    <>
+      {/* Mobile Overlay */}
+      <div className={`sidebar-overlay ${isOpen ? 'show' : ''}`} onClick={onClose}></div>
+      
+      <aside className={`sidebar-container glass ${isOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <h2 className="sidebar-title">{title}</h2>
+          {subtitle && <p className="sidebar-subtitle">{subtitle}</p>}
+          <button className="sidebar-close-btn" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
       <nav className="sidebar-nav">
         {items.map(item => {
           const Icon = item.icon;
@@ -40,5 +49,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ items, activeId, onSelect, tit
         })}
       </nav>
     </aside>
+    </>
   );
 };

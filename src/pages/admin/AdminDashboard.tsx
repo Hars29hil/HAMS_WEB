@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, LayoutDashboard, Users, BarChart3, Clock, UserPlus, FileSpreadsheet, Settings, MessageSquare, Bell } from 'lucide-react';
+import { LogOut, LayoutDashboard, Users, BarChart3, Clock, UserPlus, FileSpreadsheet, Settings, MessageSquare, Bell, Menu } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
@@ -15,6 +15,7 @@ export const AdminDashboard: React.FC = () => {
   const [activeView, setActiveView] = useState('dashboard');
   const [dynamicSessions, setDynamicSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetchSessions();
@@ -85,15 +86,22 @@ export const AdminDashboard: React.FC = () => {
   const currentItem = getSidebarItems().find(item => item.id === activeView);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div className="admin-layout">
       <Sidebar 
         items={getSidebarItems()} 
         activeId={activeView} 
-        onSelect={setActiveView} 
+        onSelect={(id) => { setActiveView(id); setIsSidebarOpen(false); }}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--color-bg)' }}>
-        <header style={{ padding: '16px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 10, background: 'var(--color-bg)' }}>
-          <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Admin'}</h2>
+      <div className="main-content">
+        <header className="top-header">
+          <div className="header-left">
+            <button className="menu-btn" onClick={() => setIsSidebarOpen(true)}>
+              <Menu size={24} />
+            </button>
+            <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{currentItem?.label || 'Admin'}</h2>
+          </div>
           <button className="logout-btn" onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', cursor: 'pointer' }}>
             <LogOut size={16} />
             Logout

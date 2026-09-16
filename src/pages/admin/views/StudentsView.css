@@ -272,3 +272,35 @@
 .btn-save:hover {
   background: var(--color-accent-dark);
 }
+
+@media (max-width: 768px) {
+  .students-view-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .search-box {
+    width: 100%;
+  }
+  
+  .student-card-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .student-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .custom-modal {
+    padding: 16px;
+    width: 100%;
+    margin: 16px;
+  }
+}
