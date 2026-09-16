@@ -96,7 +96,7 @@
 }
 
 .sync-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-surface);
 }
 
 .students-list {
@@ -196,7 +196,7 @@
 .custom-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -230,7 +230,7 @@
   padding: 12px;
   border-radius: 8px;
   border: 1px solid var(--color-border);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-bg);
   color: var(--color-text);
   font-size: 16px;
   margin-bottom: 24px;
@@ -261,7 +261,7 @@
 }
 
 .btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-border);
 }
 
 .btn-save {

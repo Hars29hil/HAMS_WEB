@@ -1,31 +1,32 @@
 :root {
   --font-family: 'Inter', system-ui, -apple-system, sans-serif;
   
-  /* Color Palette (Dark Theme) */
-  --color-bg: #0b0f19;
-  --color-bg-elevated: rgba(30, 41, 59, 0.5); /* Glass base */
-  --color-bg-glass: rgba(15, 23, 42, 0.6);
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-hover: rgba(255, 255, 255, 0.2);
+  /* Color Palette (English Light Theme) */
+  --color-bg: #f8fafc;
+  --color-bg-elevated: #ffffff; /* Solid white for cards */
+  --color-surface: #f1f5f9; /* Slate 100 for inputs/rows */
+  --color-bg-glass: rgba(255, 255, 255, 0.8);
+  --color-border: #e2e8f0;
+  --color-border-hover: #cbd5e1;
   
   --color-accent-light: #60a5fa;
-  --color-accent: #3b82f6;
+  --color-accent: #3b82f6; /* English Blue */
   --color-accent-dark: #2563eb;
   
-  --color-text: #f8fafc;
-  --color-text-muted: #94a3b8;
+  --color-text: #1e293b;
+  --color-text-muted: #64748b;
   
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-error: #ef4444;
   
   /* Gradients */
-  --gradient-accent: linear-gradient(135deg, var(--color-accent-light), var(--color-accent-dark));
+  --gradient-accent: linear-gradient(135deg, var(--color-accent), var(--color-accent-dark));
   
   /* Shadows */
-  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
-  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
 }
 
 * {
@@ -43,8 +44,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
   
   /* Subtle background pattern/mesh */
-  background-image: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
-                    radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15), transparent 25%);
+  background-image: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.05), transparent 35%),
+                    radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.05), transparent 35%);
 }
 
 #root {

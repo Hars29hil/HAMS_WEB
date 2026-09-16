@@ -56,15 +56,15 @@
 }
 
 .sidebar-nav-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-surface);
   color: var(--color-text);
 }
 
 .sidebar-nav-item.active {
   background: var(--color-accent);
-  color: var(--color-bg);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 12px rgba(183, 161, 245, 0.2);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
 }
 
 .sidebar-nav-icon {

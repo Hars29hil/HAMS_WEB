@@ -25,7 +25,7 @@
 }
 
 .filters-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-surface);
 }
 
 .filters-card h4 {
@@ -76,7 +76,7 @@
 }
 
 .attendance-row-header:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-surface);
 }
 
 .row-info {
@@ -128,7 +128,7 @@
 
 .attendance-row-details {
   padding: 16px 20px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;

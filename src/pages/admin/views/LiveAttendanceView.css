@@ -36,7 +36,7 @@
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-surface);
   color: var(--color-text);
 }
 
@@ -154,7 +154,7 @@
   font-size: 18px;
   font-weight: 700;
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
   cursor: pointer;
 }
 

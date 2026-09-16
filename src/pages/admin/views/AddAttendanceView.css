@@ -45,7 +45,7 @@
   color: var(--color-text);
   font-size: 16px;
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
   cursor: pointer;
 }
 
@@ -76,13 +76,13 @@
 }
 
 .icon-option:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-elevated);
 }
 
 .icon-option.selected {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: var(--color-bg);
+  color: #ffffff;
 }
 
 .submit-btn {
@@ -90,7 +90,7 @@
   border-radius: 12px;
   border: none;
   background: var(--color-accent);
-  color: var(--color-bg);
+  color: #ffffff;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
