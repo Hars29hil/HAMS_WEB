@@ -65,7 +65,7 @@
 .connect-btn {
   display: inline-block;
   padding: 10px 20px;
-  background-color: var(--color-primary);
+  background-color: var(--color-accent);
   color: white;
   border: none;
   border-radius: 8px;
@@ -117,7 +117,7 @@
 
 .get-code-btn {
   padding: 10px 16px;
-  background-color: var(--color-primary);
+  background-color: var(--color-accent);
   color: white;
   border: none;
   border-radius: 8px;
@@ -136,7 +136,7 @@
   font-size: 32px;
   font-weight: 700;
   letter-spacing: 8px;
-  color: var(--color-primary);
+  color: var(--color-accent);
 }
 
 .success-banner {
@@ -169,9 +169,9 @@
 }
 
 .placeholder-chip:hover {
-  background-color: var(--color-primary-soft);
-  color: var(--color-primary);
-  border-color: var(--color-primary);
+  background-color: rgba(59, 130, 246, 0.1);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .message-textarea {
@@ -191,7 +191,7 @@
   align-items: center;
   gap: 8px;
   padding: 12px 24px;
-  background-color: var(--color-primary);
+  background-color: var(--color-accent);
   color: white;
   border: none;
   border-radius: 8px;
@@ -255,7 +255,7 @@
 
 .selected-count {
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-accent);
 }
 
 .students-table-wrapper {
@@ -287,7 +287,7 @@
 }
 
 .students-table tr.selected {
-  background-color: var(--color-primary-soft);
+  background-color: rgba(59, 130, 246, 0.1);
 }
 
 /* Modal Styles */
@@ -357,16 +357,16 @@
 }
 
 .filter-chip.selected {
-  background-color: var(--color-primary);
+  background-color: var(--color-accent);
   color: white;
-  border-color: var(--color-primary);
+  border-color: var(--color-accent);
 }
 
 .done-btn {
   margin-top: auto;
   align-self: flex-end;
   padding: 12px 32px;
-  background-color: var(--color-primary);
+  background-color: var(--color-accent);
   color: white;
   border: none;
   border-radius: 8px;

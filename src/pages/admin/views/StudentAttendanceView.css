@@ -52,7 +52,7 @@
 
 .filter-chip.active {
   background: var(--color-accent);
-  color: var(--color-bg);
+  color: #ffffff;
   border-color: var(--color-accent);
 }
 

@@ -184,14 +184,13 @@ export const StudentAttendanceView: React.FC = () => {
           <p>Overall attendance records and reports.</p>
         </div>
         <div className="header-actions">
-          <div className="search-box" style={{ display: 'flex', alignItems: 'center', backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '0 12px' }}>
-            <Search size={18} className="search-icon" color="var(--color-text-muted)" />
+          <div className="search-box">
+            <Search size={18} className="search-icon" />
             <input 
               type="text" 
               placeholder="Search Name/Code..." 
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              style={{ border: 'none', background: 'transparent', padding: '8px', outline: 'none', color: 'var(--color-text)', width: '200px' }}
             />
           </div>
           <button className="action-btn" onClick={() => setShowFilters(!showFilters)}>
