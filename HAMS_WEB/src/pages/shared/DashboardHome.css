@@ -1,0 +1,160 @@
+.admin-container {
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  margin-bottom: 2rem;
+  border-radius: 100px !important;
+}
+
+.admin-header h2 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  color: var(--color-text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.kpi-card {
+  display: flex;
+  align-items: center;
+}
+
+.kpi-icon {
+  padding: 1rem;
+  border-radius: 12px;
+  margin-right: 1.2rem;
+}
+.kpi-icon.blue { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.kpi-icon.green { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.kpi-icon.orange { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+.kpi-icon.red { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+.kpi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.kpi-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 1000px) {
+  .dashboard-main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}
+
+.chart-section {
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-wrapper {
+  flex: 1;
+  min-height: 0;
+}
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.floor-section {
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.floor-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.floor-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.floor-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.floor-info h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.floor-sub {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.floor-badge {
+  display: flex;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status-dot.online {
+  background: var(--color-success);
+  margin-right: 6px;
+}
+.status-dot.offline {
+  background: var(--color-error);
+  margin-right: 6px;
+}
+
+.loading-screen, .error-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

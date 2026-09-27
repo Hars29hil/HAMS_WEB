@@ -1,0 +1,109 @@
+import React, { useState, useEffect } from 'react';
+import { Routes, Route, useLocation, useNavigate, useParams, Navigate } from 'react-router-dom';
+import apiClient from '../services/apiClient';
+import { AdminSidebar } from '../components/AdminSidebar';
+import { AdminHeader } from '../components/AdminHeader';
+import { DashboardOverview } from './views/DashboardOverview';
+import { AttendanceReportsView } from './views/AttendanceReportsView';
+import { StudentsManagementView } from './views/StudentsManagementView';
+import { LeadersManagementView } from './views/LeadersManagementView';
+import { WhatsAppMessagingView } from './views/WhatsAppMessagingView';
+import { LiveAttendanceManager } from './views/LiveAttendanceManager';
+import { CreateSessionView } from './views/CreateSessionView';
+import { DeviceSecurityView } from './views/DeviceSecurityView';
+
+const SessionViewWrapper: React.FC<{ onSessionDeleted: () => void }> = ({ onSessionDeleted }) => {
+  const { sessionKey } = useParams<{ sessionKey: string }>();
+  if (!sessionKey) return <Navigate to="/" replace />;
+  return <LiveAttendanceManager sessionKey={sessionKey} onSessionDeleted={onSessionDeleted} />;
+};
+
+export const AdminLayout: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sessions, setSessions] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, []);
+
+  const fetchSessions = async () => {
+    try {
+      const res = await apiClient.get('/admin/sessions');
+      if (res.data.success) {
+        setSessions(res.data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const getHeaderInfo = () => {
+    const p = location.pathname;
+    if (p === '/' || p === '/dashboard') {
+      return { title: 'Dashboard Overview', subtitle: "Live attendance statistics & hostel operations" };
+    }
+    if (p === '/attendance') {
+      return { title: 'Attendance Records', subtitle: 'Detailed reports, filters, and CSV export' };
+    }
+    if (p === '/students') {
+      return { title: 'Student Management', subtitle: 'Manage active students, floor & room assignments' };
+    }
+    if (p === '/leaders') {
+      return { title: 'Floor Leaders Management', subtitle: 'Create, assign multiple floors, and manage floor leaders' };
+    }
+    if (p === '/messages') {
+      return { title: 'WhatsApp Automation', subtitle: 'Broadcast real-time attendance alerts to students' };
+    }
+    if (p === '/security') {
+      return { title: 'Proxy & Multi-Account Security Audit', subtitle: 'Detect and resolve cross-student logins from same IP / Device' };
+    }
+    if (p === '/session_add' || p === '/add_session') {
+      return { title: 'Create Session', subtitle: 'Add a new dynamic attendance schedule' };
+    }
+    if (p.startsWith('/session/')) {
+      const key = p.replace('/session/', '');
+      const s = sessions.find(item => item.session_key === key);
+      return { title: `${s?.session_name || 'Session'} Control`, subtitle: 'Configure live timings and review attendance' };
+    }
+    return { title: 'Admin Control Center' };
+  };
+
+  const headerInfo = getHeaderInfo();
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100vw', backgroundColor: '#f8fafc' }}>
+      {/* Sidebar */}
+      <AdminSidebar
+        isOpen={sidebarOpen}
+        onCloseMobile={() => setSidebarOpen(false)}
+        sessions={sessions}
+      />
+
+      {/* Main Container */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto' }}>
+        <AdminHeader
+          title={headerInfo.title}
+          subtitle={headerInfo.subtitle}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        />
+        <div style={{ flex: 1, padding: '24px' }}>
+          <Routes>
+            <Route path="/" element={<DashboardOverview />} />
+            <Route path="/dashboard" element={<DashboardOverview />} />
+            <Route path="/attendance" element={<AttendanceReportsView />} />
+            <Route path="/students" element={<StudentsManagementView />} />
+            <Route path="/leaders" element={<LeadersManagementView />} />
+            <Route path="/messages" element={<WhatsAppMessagingView />} />
+            <Route path="/security" element={<DeviceSecurityView />} />
+            <Route path="/session_add" element={<CreateSessionView onAdded={() => { fetchSessions(); navigate('/'); }} />} />
+            <Route path="/add_session" element={<CreateSessionView onAdded={() => { fetchSessions(); navigate('/'); }} />} />
+            <Route path="/session/:sessionKey" element={<SessionViewWrapper onSessionDeleted={() => { fetchSessions(); navigate('/'); }} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </main>
+    </div>
+  );
+};

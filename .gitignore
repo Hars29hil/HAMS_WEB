@@ -1,9 +1,15 @@
 # Dependencies
 node_modules/
+*/node_modules/
+
+# Build artifacts
+dist/
+*/dist/
 
 # Environment variables & secrets
 .env
 .env.*
+!.env.example
 firebase-service-account.json
 _auth_info_baileys/
 auth_info/
@@ -15,10 +21,6 @@ tmp/
 temp_qr/
 console.log
 stderr.log
-
-# Frontend folders (if tracked separately)
-HAMS_ADMIN/
-HAMS_WEB/
 
 # Database dumps & large archives
 *.sql
