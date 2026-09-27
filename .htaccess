@@ -1,0 +1,14 @@
+# Hostinger / cPanel Node.js Application Routing
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^$ http://127.0.0.1:3001/ [P,L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)$ http://127.0.0.1:3001/$1 [P,L]
+</IfModule>
+
+# Fallback for LiteSpeed / Apache Proxy
+<IfModule mod_proxy.c>
+  ProxyPass / http://127.0.0.1:3001/
+  ProxyPassReverse / http://127.0.0.1:3001/
+</IfModule>
