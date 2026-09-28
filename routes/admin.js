@@ -95,36 +95,36 @@ router.get('/dashboard', async (req, res) => {
         SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
-        JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = ? AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-      `, [targetDate, leaderFloors, ...sessionParams]);
+        JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
+      `, [targetDate, targetDate, leaderFloors, ...sessionParams]);
       present_today = presentRow ? presentRow.present_today : 0;
 
       const [[lateRow]] = await pool.query(`
         SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
-        JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = ? AND ar.is_late = TRUE AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-      `, [targetDate, leaderFloors, ...sessionParams]);
+        JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (ar.is_late = TRUE OR ar.is_late = 1) AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
+      `, [targetDate, targetDate, leaderFloors, ...sessionParams]);
       late_today = lateRow ? parseInt(lateRow.late_today || 0, 10) : 0;
     } else {
       const [[presentRow]] = await pool.query(`
         SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
-        JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = ? AND st.is_active = TRUE ${sessionCondition}
-      `, [targetDate, ...sessionParams]);
+        JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE ${sessionCondition}
+      `, [targetDate, targetDate, ...sessionParams]);
       present_today = presentRow ? presentRow.present_today : 0;
 
       const [[lateRow]] = await pool.query(`
         SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
-        JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = ? AND ar.is_late = TRUE AND st.is_active = TRUE ${sessionCondition}
-      `, [targetDate, ...sessionParams]);
+        JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (ar.is_late = TRUE OR ar.is_late = 1) AND st.is_active = TRUE ${sessionCondition}
+      `, [targetDate, targetDate, ...sessionParams]);
       late_today = lateRow ? parseInt(lateRow.late_today || 0, 10) : 0;
     }
 
@@ -135,10 +135,15 @@ router.get('/dashboard', async (req, res) => {
       SELECT s.session_type, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as present_count
       FROM attendance_sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id
-      LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-      WHERE s.session_date = ? AND (st.is_active = TRUE OR ar.bank_code IS NULL)
+      LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+      WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (st.is_active = TRUE OR ar.bank_code IS NULL)
     `;
-    const allSessionsParams = [targetDate];
+    const allSessionsParams = [targetDate, targetDate];
+    if (leaderFloors && leaderFloors.length > 0) {
+      allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
+      allSessionsParams.push(leaderFloors);
+    }
+    allSessionsQuery += ' GROUP BY s.session_type';
     if (leaderFloors && leaderFloors.length > 0) {
       allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
       allSessionsParams.push(leaderFloors);
@@ -235,10 +240,10 @@ router.get('/dashboard', async (req, res) => {
       SELECT st.floor_id, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count
       FROM attendance_records ar
       JOIN attendance_sessions s ON ar.session_id = s.id
-      JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-      WHERE s.session_date = ? AND st.is_active = TRUE
+      JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+      WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE
     `;
-    const floorPresentParams = [targetDate];
+    const floorPresentParams = [targetDate, targetDate];
     if (activeFilterKey !== 'all') {
       floorPresentQuery += ' AND s.session_type = ?';
       floorPresentParams.push(activeFilterKey);

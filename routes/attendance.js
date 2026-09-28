@@ -1564,13 +1564,24 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
              sl.end_time as leave_end
       FROM students s
       LEFT JOIN (
-        SELECT id, session_date, session_type 
-        FROM attendance_sessions 
-        WHERE session_date = ? AND LOWER(session_type) = LOWER(?)
-        ORDER BY id DESC LIMIT 1
-      ) ses ON 1=1
-      LEFT JOIN attendance_records ar ON (ar.session_id = ses.id AND (s.student_code = ar.bank_code OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM ar.bank_code)))
-      LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND aar.session_date = ? AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
+        SELECT 
+          ar.student_id,
+          TRIM(LEADING '0' FROM ar.bank_code) AS clean_bank_code,
+          ar.bank_code,
+          MIN(ar.marked_at) AS marked_at,
+          MAX(CASE WHEN ar.is_late = TRUE OR ar.is_late = 1 THEN 1 ELSE 0 END) AS is_late,
+          MAX(ar.remarks) AS remarks,
+          MAX(ar.session_id) AS session_id
+        FROM attendance_records ar
+        JOIN attendance_sessions ses ON ar.session_id = ses.id
+        WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
+        GROUP BY ar.student_id, TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
+      ) ar ON (
+        (ar.student_id IS NOT NULL AND ar.student_id = s.id) OR
+        (ar.clean_bank_code IS NOT NULL AND ar.clean_bank_code != '' AND ar.clean_bank_code = TRIM(LEADING '0' FROM s.student_code)) OR
+        ar.bank_code = s.student_code
+      )
+      LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND (aar.session_date = ? OR DATE(aar.session_date) = ?) AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
       LEFT JOIN student_leaves sl ON (
         (s.id = sl.student_id OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM sl.bank_code))
         AND sl.status = 'approved'
@@ -1580,7 +1591,7 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionType, sessionDate, sessionType, sessionDate];
+    const queryParams = [sessionDate, sessionDate, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
@@ -1709,13 +1720,21 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
              sl.reason as leave_reason
       FROM students s
       LEFT JOIN (
-        SELECT id, session_date, session_type 
-        FROM attendance_sessions 
-        WHERE session_date = ? AND LOWER(session_type) = LOWER(?)
-        ORDER BY id DESC LIMIT 1
-      ) ses ON 1=1
-      LEFT JOIN attendance_records ar ON (s.student_code = ar.bank_code OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM ar.bank_code)) AND ar.session_id = ses.id
-      LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND aar.session_date = ? AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
+        SELECT 
+          ar.student_id,
+          TRIM(LEADING '0' FROM ar.bank_code) AS clean_bank_code,
+          ar.bank_code,
+          MAX(ar.session_id) AS session_id
+        FROM attendance_records ar
+        JOIN attendance_sessions ses ON ar.session_id = ses.id
+        WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
+        GROUP BY ar.student_id, TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
+      ) ar ON (
+        (ar.student_id IS NOT NULL AND ar.student_id = s.id) OR
+        (ar.clean_bank_code IS NOT NULL AND ar.clean_bank_code != '' AND ar.clean_bank_code = TRIM(LEADING '0' FROM s.student_code)) OR
+        ar.bank_code = s.student_code
+      )
+      LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND (aar.session_date = ? OR DATE(aar.session_date) = ?) AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
       LEFT JOIN student_leaves sl ON (
         (s.id = sl.student_id OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM sl.bank_code))
         AND sl.status = 'approved'
@@ -1725,7 +1744,7 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionType, sessionDate, sessionType, sessionDate];
+    const queryParams = [sessionDate, sessionDate, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
