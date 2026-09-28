@@ -469,7 +469,7 @@ export const DashboardOverview: React.FC = () => {
                 Live Floor Status
               </h3>
               <p style={{ fontSize: '13px', color: '#64748b', margin: '2px 0 0 0' }}>
-                Live count per floor
+                Live count for <strong>{currentSessionName}</strong>
               </p>
             </div>
             <Radio size={20} color="#4f46e5" />
@@ -547,7 +547,7 @@ export const DashboardOverview: React.FC = () => {
                   3+ Consecutive Days Absentees
                 </h3>
                 <p style={{ fontSize: '13px', color: '#64748b', margin: '2px 0 0 0' }}>
-                  Students absent for the last 3 days — track both justified and unjustified absences.
+                  Students absent for the last {stats?.target_dates?.length || 3} occurrences of <strong>{currentSessionName}</strong> — track both justified and unjustified absences.
                 </p>
               </div>
             </div>

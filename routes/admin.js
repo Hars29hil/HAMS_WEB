@@ -217,64 +217,72 @@ router.get('/dashboard', async (req, res) => {
     }
     floorsQuery += ' ORDER BY floor_id ASC';
     const [floors] = await pool.query(floorsQuery, floorsParams);
-    const floor_status = [];
 
-    // Find the latest session for the activeFilterKey
-    let targetSessionQuery = 'SELECT id, starts_at, ends_at FROM attendance_sessions WHERE session_date = CURDATE()';
-    const targetSessionQueryParams = [];
+    // Live present count per floor specifically for activeFilterKey on CURDATE()
+    let floorPresentQuery = `
+      SELECT st.floor_id, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count
+      FROM attendance_records ar
+      JOIN attendance_sessions s ON ar.session_id = s.id
+      JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
+      WHERE s.session_date = CURDATE() AND st.is_active = TRUE
+    `;
+    const floorPresentParams = [];
     if (activeFilterKey !== 'all') {
-      targetSessionQuery += ' AND session_type = ?';
-      targetSessionQueryParams.push(activeFilterKey);
+      floorPresentQuery += ' AND s.session_type = ?';
+      floorPresentParams.push(activeFilterKey);
     }
-    targetSessionQuery += ' ORDER BY id DESC LIMIT 1';
+    if (leaderFloors && leaderFloors.length > 0) {
+      floorPresentQuery += ' AND st.floor_id IN (?)';
+      floorPresentParams.push(leaderFloors);
+    }
+    floorPresentQuery += ' GROUP BY st.floor_id';
 
-    const [targetSessions] = await pool.query(targetSessionQuery, targetSessionQueryParams);
-    const activeTargetSession = targetSessions.length > 0 ? targetSessions[0] : null;
-
-    const now = new Date();
-    let global_session_status = 'Offline';
-    if (activeTargetSession && activeTargetSession.starts_at && activeTargetSession.ends_at) {
-      if (now >= new Date(activeTargetSession.starts_at) && now <= new Date(activeTargetSession.ends_at)) {
-        global_session_status = 'Active';
-      }
+    const [floorPresentRows] = await pool.query(floorPresentQuery, floorPresentParams);
+    const floorPresentMap = {};
+    for (const row of floorPresentRows) {
+      floorPresentMap[row.floor_id] = row.present_count;
     }
 
-    for (const f of floors) {
-      let present_students = 0;
-      
-      if (activeTargetSession) {
-        try {
-          const [[{ present_count }]] = await pool.query(`
-            SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count 
-            FROM attendance_records ar
-            JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-            WHERE ar.session_id = ? AND ar.floor_id = ? AND st.is_active = TRUE
-          `, [activeTargetSession.id, f.floor_id]);
-          present_students = present_count || 0;
-        } catch (fErr) {}
-      }
+    // Floor total active students
+    let floorTotalsQuery = 'SELECT floor_id, COUNT(*) AS floor_total FROM students WHERE is_active = TRUE';
+    const floorTotalsParams = [];
+    if (leaderFloors && leaderFloors.length > 0) {
+      floorTotalsQuery += ' AND floor_id IN (?)';
+      floorTotalsParams.push(leaderFloors);
+    }
+    floorTotalsQuery += ' GROUP BY floor_id';
+    const [floorTotalRows] = await pool.query(floorTotalsQuery, floorTotalsParams);
+    const floorTotalMap = {};
+    for (const row of floorTotalRows) {
+      floorTotalMap[row.floor_id] = row.floor_total;
+    }
 
-      let floor_total = 0;
-      try {
-        const [[{ floor_total: ft }]] = await pool.query('SELECT COUNT(*) AS floor_total FROM students WHERE floor_id = ? AND is_active = TRUE', [f.floor_id]);
-        floor_total = ft || 0;
-      } catch (ftErr) {}
-
-      floor_status.push({
+    const floor_status = floors.map(f => {
+      const present = floorPresentMap[f.floor_id] || 0;
+      const total = floorTotalMap[f.floor_id] || 0;
+      return {
         floor_id: f.floor_id,
-        floor_name: f.floor_name,
-        present: present_students,
-        present_students: present_students,
-        total: floor_total,
-        total_students: floor_total,
-        percentage: floor_total > 0 ? Math.round((present_students / floor_total) * 100) : 0
-      });
-    }
+        floor_name: f.floor_name || (f.floor_id === 0 ? 'Ground Floor' : `Floor ${f.floor_id}`),
+        present: present,
+        present_students: present,
+        total: total,
+        total_students: total,
+        percentage: total > 0 ? Math.round((present / total) * 100) : 0
+      };
+    });
 
-    // 8. Find students absent for the last 3 days who have NOT provided justification
+    // 8. Find students absent for the last 3 occurrences of the selected session
+    let distinctDatesQuery = 'SELECT DISTINCT session_date FROM attendance_sessions WHERE 1=1';
+    const distinctDatesParams = [];
+    if (activeFilterKey !== 'all') {
+      distinctDatesQuery += ' AND session_type = ?';
+      distinctDatesParams.push(activeFilterKey);
+    }
+    distinctDatesQuery += ' ORDER BY session_date DESC LIMIT 3';
+
     let distinctDatesRows = [];
     try {
-      const [rows] = await pool.query('SELECT DISTINCT session_date FROM attendance_sessions ORDER BY session_date DESC LIMIT 3');
+      const [rows] = await pool.query(distinctDatesQuery, distinctDatesParams);
       distinctDatesRows = rows;
     } catch (dErr) {}
 
@@ -283,7 +291,7 @@ router.get('/dashboard', async (req, res) => {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     });
 
-    if (targetDates.length < 3) {
+    if (targetDates.length === 0) {
       const today = new Date();
       targetDates = [0, 1, 2].map(offset => {
         const d = new Date(today);
@@ -312,23 +320,35 @@ router.get('/dashboard', async (req, res) => {
 
     if (targetDates.length > 0) {
       try {
-        const [recRows] = await pool.query(`
+        let recQuery = `
           SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, ses.session_date
           FROM attendance_records ar
           JOIN attendance_sessions ses ON ar.session_id = ses.id
           WHERE ses.session_date IN (?)
-        `, [targetDates]);
+        `;
+        const recParams = [targetDates];
+        if (activeFilterKey !== 'all') {
+          recQuery += ' AND ses.session_type = ?';
+          recParams.push(activeFilterKey);
+        }
+        const [recRows] = await pool.query(recQuery, recParams);
         recentAttendanceRecords = recRows || [];
       } catch (recErr) {
         console.warn('Attendance records query warning in dashboard:', recErr.message);
       }
 
       try {
-        const [justRows] = await pool.query(`
+        let justQuery = `
           SELECT student_id, session_date, reason, is_justified
           FROM attendance_absent_reasons
           WHERE session_date IN (?) AND is_justified = 1
-        `, [targetDates]);
+        `;
+        const justParams = [targetDates];
+        if (activeFilterKey !== 'all') {
+          justQuery += ' AND (session_type = ? OR session_type IS NULL)';
+          justParams.push(activeFilterKey);
+        }
+        const [justRows] = await pool.query(justQuery, justParams);
         recentJustifications = justRows || [];
       } catch (justErr) {
         console.warn('Absent reasons query warning in dashboard:', justErr.message);
@@ -399,6 +419,8 @@ router.get('/dashboard', async (req, res) => {
     } catch(e) {}
 
     const consecutive_absentees = [];
+    const minRequiredMisses = Math.min(3, Math.max(1, targetDates.length));
+
     for (const s of activeStudents) {
       const cleanCode = (s.student_code || '').replace(/^0+/, '');
       const missedDates = [];
@@ -417,8 +439,8 @@ router.get('/dashboard', async (req, res) => {
         }
       }
 
-      // If student was absent for all 3 days
-      if (missedDates.length >= 3) {
+      // If student was absent for all target dates of this session (up to 3)
+      if (missedDates.length >= minRequiredMisses) {
         const isJustified = justifiedDates.length > 0;
         let studentTags = tagsMap[s.id] || tagsMap[s.student_code] || tagsMap[cleanCode] || [];
         if (studentTags.length === 0 && aiTagsMap[s.id]) {
