@@ -223,6 +223,9 @@ cron.schedule('* * * * *', async () => {
           );
 
           for (const st of defaultStudents) {
+            const onLeave = await leaveService.isStudentOnLeave(st.id, st.student_code, sessionDate);
+            if (onLeave) continue; // Skip students who are on approved leave
+
             const [existing] = await pool.query(
               'SELECT id FROM attendance_records WHERE session_id = ? AND (student_id = ? OR TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?))',
               [activeSessionId, st.id, st.student_code]
@@ -234,13 +237,6 @@ cron.schedule('* * * * *', async () => {
                  VALUES (?, ?, ?, ?, ?, 'AUTO_DEFAULT', 0, 'DEFAULT_AUTO_PRESENT', 0, 'Auto-marked as Default Present')`,
                 [activeSessionId, st.student_code, st.name, st.id, st.floor_id || 0]
               );
-
-              try {
-                await pool.query(
-                  'DELETE FROM attendance_absent_reasons WHERE student_id = ? AND session_date = ? AND LOWER(session_type) = LOWER(?)',
-                  [st.id, sessionDate, schedule.session_key]
-                );
-              } catch(e) {}
             }
           }
         } catch(autoErr) {

@@ -125,42 +125,6 @@ async function syncLeaves(options = {}) {
 
       if (res.affectedRows === 1) insertedCount++;
       else if (res.affectedRows >= 2) updatedCount++;
-
-      // If approved and matched with student_id, retroactively populate/ensure attendance_absent_reasons
-      if (status === 'approved' && studentId) {
-        try {
-          // Compute all dates between startTime and endTime
-          const startDt = new Date(startTimeStr);
-          const endDt = new Date(endTimeStr);
-          const curDt = new Date(startDt);
-
-          while (curDt <= endDt) {
-            const dateStr = curDt.toISOString().slice(0, 10);
-            
-            // Mark absent justification for all sessions on this date
-            for (const sessionKey of schedules) {
-              await pool.query(`
-                INSERT INTO attendance_absent_reasons (student_id, session_date, session_type, reason, is_justified)
-                VALUES (?, ?, ?, ?, TRUE)
-                ON DUPLICATE KEY UPDATE 
-                  reason = VALUES(reason),
-                  is_justified = TRUE
-              `, [studentId, dateStr, sessionKey, `[Approved Leave] ${reason}`]).catch(() => {
-                // Fallback if table doesn't have unique constraint or session_type
-                return pool.query(`
-                  UPDATE attendance_absent_reasons 
-                  SET reason = ?, is_justified = TRUE 
-                  WHERE student_id = ? AND session_date = ? AND (session_type = ? OR session_type IS NULL)
-                `, [`[Approved Leave] ${reason}`, studentId, dateStr, sessionKey]);
-              });
-            }
-
-            curDt.setDate(curDt.getDate() + 1);
-          }
-        } catch (markErr) {
-          console.warn(`[LeaveService] Warning applying leave reasons for ${bankCode}:`, markErr.message);
-        }
-      }
     }
 
     console.log(`[LeaveService] Sync finished. Total: ${rawLeaves.length} (New: ${insertedCount}, Updated: ${updatedCount})`);

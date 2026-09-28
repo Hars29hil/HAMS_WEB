@@ -1599,6 +1599,28 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       queryParams.push(assignedStudentIds, assignedStudentIds, assignedStudentIds);
     }
 
+    // Check if session has started or was conducted
+    const [recCountRow] = await pool.query(`
+      SELECT COUNT(*) as rec_count
+      FROM attendance_records ar
+      JOIN attendance_sessions ses ON ar.session_id = ses.id
+      WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
+    `, [sessionDate, sessionDate, sessionType]);
+
+    const recordCount = recCountRow[0]?.rec_count || 0;
+    let sessionStarted = recordCount > 0;
+
+    if (!sessionStarted) {
+      const nowIST = getCurrentIST();
+      const todayStr = nowIST.toISOString().slice(0, 10);
+      if (sessionDate === todayStr) {
+        const [sched] = await pool.query('SELECT start_time, end_time FROM attendance_schedules WHERE LOWER(session_key) = ?', [sessionType]);
+        if (sched.length > 0) {
+          sessionStarted = isTimeInWindow(nowIST, sched[0].start_time, sched[0].end_time);
+        }
+      }
+    }
+
     const [rows] = await pool.query(query, queryParams);
 
     // Fetch tags for these students safely
@@ -1633,6 +1655,8 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
         status = isLate ? 'Late' : 'Present';
       } else if (isOnLeave) {
         status = 'Leave';
+      } else if (!sessionStarted) {
+        status = 'Not Started';
       }
 
       const effectiveReason = r.leave_reason ? `[Approved Leave] ${r.leave_reason}` : (r.absent_reason || null);
@@ -1641,6 +1665,7 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       return {
         ...r,
         status,
+        session_started: sessionStarted,
         is_justified: isJustified,
         reason: effectiveReason,
         remarks: r.attendance_remarks || (isOnLeave ? (r.leave_reason || 'Approved Leave') : null),
@@ -1648,7 +1673,7 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       };
     });
 
-    return res.json({ success: true, data: formattedRows });
+    return res.json({ success: true, session_started: sessionStarted, total_present: recordCount, data: formattedRows });
   } catch (err) {
     console.error('Error fetching student session attendance:', err);
     return res.status(500).json({ success: false, message: 'Server error fetching student attendance: ' + (err.sqlMessage || err.message) });
@@ -1663,6 +1688,32 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
     const sessionType = (req.params.type || 'night').toLowerCase();
     const rawDate = req.query.date || new Date().toISOString().slice(0, 10);
     const sessionDate = typeof rawDate === 'string' ? rawDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    
+    // Check if session has started or was conducted
+    const [recCountRow] = await pool.query(`
+      SELECT COUNT(*) as rec_count
+      FROM attendance_records ar
+      JOIN attendance_sessions ses ON ar.session_id = ses.id
+      WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
+    `, [sessionDate, sessionDate, sessionType]);
+
+    const recordCount = recCountRow[0]?.rec_count || 0;
+    let sessionStarted = recordCount > 0;
+
+    if (!sessionStarted) {
+      const nowIST = getCurrentIST();
+      const todayStr = nowIST.toISOString().slice(0, 10);
+      if (sessionDate === todayStr) {
+        const [sched] = await pool.query('SELECT start_time, end_time FROM attendance_schedules WHERE LOWER(session_key) = ?', [sessionType]);
+        if (sched.length > 0) {
+          sessionStarted = isTimeInWindow(nowIST, sched[0].start_time, sched[0].end_time);
+        }
+      }
+    }
+
+    if (!sessionStarted) {
+      return res.json({ success: true, session_started: false, data: [] });
+    }
     
     // Check if session is for all students
     let isForAll = true;
