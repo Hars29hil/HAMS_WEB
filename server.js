@@ -78,6 +78,7 @@ const pool = require('./config/db');
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_student TEXT DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_time TIME DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_audience VARCHAR(50) DEFAULT "absent"'); } catch(e) {}
+    try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_alerts_config JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN last_auto_message_date DATE NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN is_for_all_students BOOLEAN DEFAULT TRUE'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_records ADD COLUMN is_late BOOLEAN DEFAULT FALSE'); } catch(e) {}

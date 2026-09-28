@@ -40,6 +40,47 @@ interface JustifyModalState {
   error?: string;
 }
 
+interface StatusAlertConfig {
+  enabled: boolean;
+  target: 'student' | 'parent' | 'both';
+  student_message: string;
+  parent_message: string;
+}
+
+interface AutoAlertsConfig {
+  absent: StatusAlertConfig;
+  late: StatusAlertConfig;
+  leave: StatusAlertConfig;
+  present: StatusAlertConfig;
+}
+
+const DEFAULT_ALERTS_CONFIG: AutoAlertsConfig = {
+  absent: {
+    enabled: true,
+    target: 'both',
+    student_message: 'Dear {name}, you were marked Absent for {session_name} on {date}. Please contact your floor leader.',
+    parent_message: 'Respected Parent, your ward {name} (Room {room}) was marked Absent for {session_name} attendance on {date} at AVD Hostel.'
+  },
+  late: {
+    enabled: false,
+    target: 'both',
+    student_message: 'Dear {name}, you were marked Late for {session_name} on {date}. Please ensure to be on time.',
+    parent_message: 'Respected Parent, your ward {name} (Room {room}) arrived Late for {session_name} attendance on {date}.'
+  },
+  leave: {
+    enabled: false,
+    target: 'both',
+    student_message: 'Dear {name}, your leave for {session_name} on {date} is recorded ({reason}).',
+    parent_message: 'Respected Parent, your ward {name} (Room {room}) is on approved leave for {session_name} on {date}.'
+  },
+  present: {
+    enabled: false,
+    target: 'both',
+    student_message: 'Dear {name}, your attendance for {session_name} on {date} was recorded successfully.',
+    parent_message: 'Respected Parent, your ward {name} (Room {room}) was marked Present for {session_name} on {date}.'
+  }
+};
+
 export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDeleted?: () => void }> = ({
   sessionKey,
   onSessionDeleted,
@@ -52,6 +93,9 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
   const [linkedSessionKey, setLinkedSessionKey] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<any[]>([]);
 
+  // Multi-Category WhatsApp Alerts Configuration
+  const [alertsConfig, setAlertsConfig] = useState<AutoAlertsConfig>(DEFAULT_ALERTS_CONFIG);
+  const [activeAlertCategory, setActiveAlertCategory] = useState<'absent' | 'late' | 'leave' | 'present'>('absent');
   const [autoMessage, setAutoMessage] = useState('');
   const [autoMessageStudent, setAutoMessageStudent] = useState('');
   const [autoMessageParent, setAutoMessageParent] = useState('');
@@ -137,6 +181,16 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
         if (d.is_for_all_students !== undefined) {
           setIsForAllStudents(Boolean(d.is_for_all_students));
         }
+
+        if (d.auto_alerts_config) {
+          const cfg = typeof d.auto_alerts_config === 'string' ? JSON.parse(d.auto_alerts_config) : d.auto_alerts_config;
+          setAlertsConfig({
+            absent: { ...DEFAULT_ALERTS_CONFIG.absent, ...(cfg.absent || {}) },
+            late: { ...DEFAULT_ALERTS_CONFIG.late, ...(cfg.late || {}) },
+            leave: { ...DEFAULT_ALERTS_CONFIG.leave, ...(cfg.leave || {}) },
+            present: { ...DEFAULT_ALERTS_CONFIG.present, ...(cfg.present || {}) }
+          });
+        }
       }
       if (allRes.data.success) {
         setAvailableSessions(allRes.data.data);
@@ -213,6 +267,19 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     }
   };
 
+  const updateCategoryConfig = (
+    cat: 'absent' | 'late' | 'leave' | 'present',
+    updates: Partial<StatusAlertConfig>
+  ) => {
+    setAlertsConfig(prev => ({
+      ...prev,
+      [cat]: {
+        ...prev[cat],
+        ...updates
+      }
+    }));
+  };
+
   const saveSchedule = async () => {
     // Validate that autoMessageTime is after endTime
     if (autoMessageTime && autoMessageTime.trim()) {
@@ -237,10 +304,11 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
         endTime: endTime,
         lateTime: lateTime,
         linkedSessionKey: linkedSessionKey,
-        autoMessage: autoMessageStudent,
-        autoMessageStudent: autoMessageStudent,
-        autoMessageParent: autoMessageParent,
-        autoMessageTime: autoMessageTime
+        autoMessage: alertsConfig.absent.student_message,
+        autoMessageStudent: alertsConfig.absent.student_message,
+        autoMessageParent: alertsConfig.absent.parent_message,
+        autoMessageTime: autoMessageTime,
+        autoAlertsConfig: alertsConfig
       });
       alert(res.data.message || 'Schedule and WhatsApp alert settings saved successfully!');
       fetchSchedule();
@@ -251,39 +319,34 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     }
   };
 
-  const sendInstantAbsentAlerts = async () => {
-    const hasStudentMsg = Boolean(autoMessageStudent && autoMessageStudent.trim());
-    const hasParentMsg = Boolean(autoMessageParent && autoMessageParent.trim());
+  const sendInstantSessionAlerts = async () => {
+    const enabledCategories = (['absent', 'late', 'leave', 'present'] as const).filter(
+      cat => alertsConfig[cat].enabled && (
+        ((alertsConfig[cat].target === 'student' || alertsConfig[cat].target === 'both') && alertsConfig[cat].student_message.trim()) ||
+        ((alertsConfig[cat].target === 'parent' || alertsConfig[cat].target === 'both') && alertsConfig[cat].parent_message.trim())
+      )
+    );
 
-    if (!hasStudentMsg && !hasParentMsg) {
-      alert('Please write an absent message in the Student Message box, Parent Message box, or both before sending.');
+    if (enabledCategories.length === 0) {
+      alert('Please enable at least one status category (Absent, Late, Leave, Present) and write a message template before sending.');
       return;
     }
 
-    let targetAudienceStr = '';
-    if (hasStudentMsg && hasParentMsg) {
-      targetAudienceStr = 'both Absent Students and their Parents';
-    } else if (hasStudentMsg) {
-      targetAudienceStr = 'Absent Students ONLY (Parent box is empty)';
-    } else {
-      targetAudienceStr = 'Absent Students\' Parents ONLY (Student box is empty)';
-    }
-
-    if (!window.confirm(`Are you sure you want to send WhatsApp alerts to ${targetAudienceStr} for today's ${sessionName}?\n\nMessages will be delivered safely in 1–2 second intervals.`)) {
+    const catLabels = enabledCategories.map(c => c.toUpperCase()).join(', ');
+    if (!window.confirm(`Are you sure you want to send WhatsApp alerts for categories: [${catLabels}] for ${sessionName} on ${attendanceDate}?\n\nMessages will be delivered safely in 1–2 second intervals.`)) {
       return;
     }
 
     setSendingAlerts(true);
     try {
-      const res = await apiClient.post(`/attendance/session/${sessionKey}/send-absent-alerts`, {
-        studentMessageTemplate: autoMessageStudent.trim(),
-        parentMessageTemplate: autoMessageParent.trim(),
+      const res = await apiClient.post(`/attendance/session/${sessionKey}/send-session-alerts`, {
+        alertsConfig: alertsConfig,
         date: attendanceDate
       });
 
-      alert(res.data.message || 'Absent alerts process started successfully.');
+      alert(res.data.message || 'Alerts dispatch started successfully.');
     } catch (e: any) {
-      alert(e.response?.data?.message || 'Failed to send absent alerts');
+      alert(e.response?.data?.message || 'Failed to send alerts');
     } finally {
       setSendingAlerts(false);
     }
@@ -694,7 +757,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
             </button>
           </div>
 
-          {/* AUTOMATED WHATSAPP ALERT FOR ABSENT STUDENTS & PARENTS */}
+          {/* AUTOMATED WHATSAPP ALERTS FOR MULTI-STATUS CATEGORIES */}
           <div className="time-window-card" style={{ marginTop: '20px' }}>
             <div className="window-card-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -703,10 +766,10 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
-                    Automated WhatsApp Alert for Absent Students & Parents
+                    Automated & Instant WhatsApp Alerts (Multi-Status)
                   </h3>
                   <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                    Configure separate message templates for absent students and their parents.
+                    Configure separate message templates & recipients (Student, Parent, or Both) for each status.
                   </p>
                 </div>
               </div>
@@ -723,12 +786,12 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                   alignItems: 'center',
                   gap: '6px'
                 }}>
-                  <Clock size={13} /> Scheduled at {format12Hour(autoMessageTime)}
+                  <Clock size={13} /> Auto-Send Scheduled at {format12Hour(autoMessageTime)}
                 </span>
               )}
             </div>
 
-            {/* Time schedule row & active delivery mode banner */}
+            {/* Time schedule row & active delivery mode summary */}
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) 2fr', gap: '20px', marginBottom: '20px' }}>
               <div className="time-input-field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
@@ -766,7 +829,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
               <div style={{
                 padding: '16px',
                 borderRadius: '12px',
-                backgroundColor: (autoMessageStudent.trim() || autoMessageParent.trim()) ? '#f8fafc' : '#f1f5f9',
+                backgroundColor: '#f8fafc',
                 border: '1px solid #e2e8f0',
                 display: 'flex',
                 flexDirection: 'column',
@@ -774,166 +837,323 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 gap: '8px'
               }}>
                 <div style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b' }}>
-                  Active Alert Dispatch Mode:
+                  Active Alert Categories Summary:
                 </div>
-                {autoMessageStudent.trim() && autoMessageParent.trim() ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#15803d', fontWeight: 700, fontSize: '13px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '6px', backgroundColor: '#dcfce7', border: '1px solid #86efac' }}>🌟 Both Active</span>
-                    <span>Messages will be delivered to <strong>Both Student & Parent</strong> WhatsApp numbers.</span>
-                  </div>
-                ) : autoMessageStudent.trim() ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0369a1', fontWeight: 700, fontSize: '13px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '6px', backgroundColor: '#e0f2fe', border: '1px solid #7dd3fc' }}>📱 Student Only</span>
-                    <span>Parent box is empty. Messages will be sent <strong>ONLY to the Student</strong>.</span>
-                  </div>
-                ) : autoMessageParent.trim() ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#7c3aed', fontWeight: 700, fontSize: '13px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '6px', backgroundColor: '#f3e8ff', border: '1px solid #d8b4fe' }}>👨‍👩‍👦 Parent Only</span>
-                    <span>Student box is empty. Messages will be sent <strong>ONLY to the Parent</strong>.</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontWeight: 600, fontSize: '13px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '6px', backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1' }}>🛑 Inactive</span>
-                    <span>Both message boxes are empty. No absent WhatsApp messages will be sent.</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* TWO MESSAGE BOXES: STUDENT & PARENT */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '16px' }}>
-              
-              {/* Box 1: Student Message Box */}
-              <div style={{
-                padding: '16px',
-                borderRadius: '12px',
-                border: autoMessageStudent.trim() ? '1.5px solid #6366f1' : '1px solid #e2e8f0',
-                backgroundColor: autoMessageStudent.trim() ? '#faf5ff' : '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
-                    <Users size={16} color="#4f46e5" /> 1. Student WhatsApp Message
-                  </label>
-                  {autoMessageStudent.trim() && (
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#4f46e5', backgroundColor: '#ede9fe', padding: '2px 6px', borderRadius: '4px' }}>
-                      Active
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                  {Object.entries(alertsConfig).filter(([_, cfg]) => cfg.enabled).length > 0 ? (
+                    Object.entries(alertsConfig).filter(([_, cfg]) => cfg.enabled).map(([k, cfg]) => {
+                      const colors: Record<string, { bg: string; text: string; border: string; icon: string }> = {
+                        absent: { bg: '#fef2f2', text: '#991b1b', border: '#fecaca', icon: '🔴' },
+                        late: { bg: '#fffbeb', text: '#92400e', border: '#fde68a', icon: '🟡' },
+                        leave: { bg: '#f5f3ff', text: '#5b21b6', border: '#ddd6fe', icon: '🏖️' },
+                        present: { bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0', icon: '🟢' }
+                      };
+                      const colorInfo = colors[k] || colors.absent;
+                      return (
+                        <span
+                          key={`summary_${k}`}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: colorInfo.bg,
+                            color: colorInfo.text,
+                            border: `1px solid ${colorInfo.border}`,
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <span>{colorInfo.icon}</span>
+                          <span style={{ textTransform: 'capitalize' }}>{k}</span>
+                          <span style={{ fontSize: '11px', opacity: 0.8 }}>({cfg.target === 'both' ? 'Both' : (cfg.target === 'student' ? 'Student' : 'Parent')})</span>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>
+                      🛑 No alert categories enabled. Select categories below to enable alerts.
                     </span>
                   )}
                 </div>
-                <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
-                  Sent to absent student's mobile number. Leave blank if you don't want to message the student.
-                </p>
-                <textarea
-                  rows={4}
-                  value={autoMessageStudent}
-                  onChange={e => {
-                    setAutoMessageStudent(e.target.value);
-                    setAutoMessage(e.target.value);
-                  }}
-                  placeholder="e.g. Dear {name}, you were marked Absent for {session_name} on {date}. Please contact your floor leader."
-                  style={{ 
-                    width: '100%', 
-                    resize: 'vertical',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '13px',
-                    fontFamily: 'inherit'
-                  }}
-                />
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>Tags:</span>
-                  {['{name}', '{session_name}', '{date}', '{floor}', '{room}'].map(tag => (
-                    <button
-                      key={`student_tag_${tag}`}
-                      type="button"
-                      onClick={() => {
-                        const next = autoMessageStudent + (autoMessageStudent ? ' ' : '') + tag;
-                        setAutoMessageStudent(next);
-                        setAutoMessage(next);
-                      }}
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid #cbd5e1',
-                        background: '#ffffff',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        color: '#4338ca'
-                      }}
-                    >
-                      + {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Box 2: Parent Message Box */}
-              <div style={{
-                padding: '16px',
-                borderRadius: '12px',
-                border: autoMessageParent.trim() ? '1.5px solid #10b981' : '1px solid #e2e8f0',
-                backgroundColor: autoMessageParent.trim() ? '#f0fdf4' : '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
-                    <Phone size={16} color="#10b981" /> 2. Parent WhatsApp Message
-                  </label>
-                  {autoMessageParent.trim() && (
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', backgroundColor: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>
-                      Active
-                    </span>
-                  )}
-                </div>
-                <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
-                  Sent to student's father/parent mobile number. Leave blank if you don't want to message parents.
-                </p>
-                <textarea
-                  rows={4}
-                  value={autoMessageParent}
-                  onChange={e => setAutoMessageParent(e.target.value)}
-                  placeholder="e.g. Respected Parent, your ward {name} (Room {room}) was marked Absent for {session_name} attendance on {date} at AVD Hostel."
-                  style={{ 
-                    width: '100%', 
-                    resize: 'vertical',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '13px',
-                    fontFamily: 'inherit'
-                  }}
-                />
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>Tags:</span>
-                  {['{name}', '{session_name}', '{date}', '{floor}', '{room}'].map(tag => (
-                    <button
-                      key={`parent_tag_${tag}`}
-                      type="button"
-                      onClick={() => setAutoMessageParent(prev => prev + (prev ? ' ' : '') + tag)}
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid #cbd5e1',
-                        background: '#ffffff',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        color: '#059669'
-                      }}
-                    >
-                      + {tag}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
+
+            {/* MULTI-SELECT STATUS SELECTOR CARDS */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '10px' }}>
+                Select Status Categories to Send WhatsApp Alerts:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                {(['absent', 'late', 'leave', 'present'] as const).map((cat) => {
+                  const isSelected = activeAlertCategory === cat;
+                  const isEnabled = alertsConfig[cat].enabled;
+                  const meta: Record<string, { label: string; icon: string; desc: string; activeColor: string; bgLight: string }> = {
+                    absent: { label: 'Absent', icon: '🔴', desc: 'Students not marked present', activeColor: '#ef4444', bgLight: '#fef2f2' },
+                    late: { label: 'Late', icon: '🟡', desc: 'Students marked after late cutoff', activeColor: '#f59e0b', bgLight: '#fffbeb' },
+                    leave: { label: 'Approved Leave', icon: '🏖️', desc: 'Students with approved leave', activeColor: '#8b5cf6', bgLight: '#f5f3ff' },
+                    present: { label: 'Present', icon: '🟢', desc: 'Successfully marked present', activeColor: '#10b981', bgLight: '#ecfdf5' }
+                  };
+                  const m = meta[cat];
+
+                  return (
+                    <div
+                      key={`cat_card_${cat}`}
+                      onClick={() => setActiveAlertCategory(cat)}
+                      style={{
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: isSelected ? `2px solid ${m.activeColor}` : (isEnabled ? '1px solid #cbd5e1' : '1px solid #e2e8f0'),
+                        backgroundColor: isSelected ? m.bgLight : (isEnabled ? '#ffffff' : '#f8fafc'),
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        boxShadow: isSelected ? `0 4px 12px ${m.activeColor}25` : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '18px' }}>{m.icon}</span>
+                          <span style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a' }}>{m.label}</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            updateCategoryConfig(cat, { enabled: e.target.checked });
+                          }}
+                          style={{
+                            width: '18px',
+                            height: '18px',
+                            cursor: 'pointer',
+                            accentColor: m.activeColor
+                          }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                        <span style={{ color: '#64748b' }}>{m.desc}</span>
+                        <span style={{
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          backgroundColor: isEnabled ? '#dcfce7' : '#f1f5f9',
+                          color: isEnabled ? '#15803d' : '#94a3b8'
+                        }}>
+                          {isEnabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* CONFIGURATION PANEL FOR SELECTED STATUS */}
+            {(() => {
+              const curCat = activeAlertCategory;
+              const curCfg = alertsConfig[curCat];
+              const curMeta: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+                absent: { label: 'Absent Students', icon: '🔴', color: '#ef4444', bg: '#fef2f2' },
+                late: { label: 'Late Students', icon: '🟡', color: '#f59e0b', bg: '#fffbeb' },
+                leave: { label: 'Approved Leave Students', icon: '🏖️', color: '#8b5cf6', bg: '#f5f3ff' },
+                present: { label: 'Present Students', icon: '🟢', color: '#10b981', bg: '#ecfdf5' }
+              };
+              const curInfo = curMeta[curCat];
+
+              return (
+                <div style={{
+                  padding: '18px',
+                  borderRadius: '12px',
+                  border: `1.5px solid ${curInfo.color}40`,
+                  backgroundColor: '#ffffff',
+                  marginBottom: '16px'
+                }}>
+                  {/* Category Sub-header & Target Options */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '20px' }}>{curInfo.icon}</span>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#0f172a' }}>
+                          Configuring Template for {curInfo.label}
+                        </h4>
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          Status: <strong style={{ color: curCfg.enabled ? '#15803d' : '#94a3b8' }}>{curCfg.enabled ? 'Enabled' : 'Disabled'}</strong>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Target Selector: Student / Parent / Both */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Send To:</span>
+                      <div style={{ display: 'inline-flex', backgroundColor: '#f1f5f9', padding: '3px', borderRadius: '8px', gap: '4px' }}>
+                        {[
+                          { key: 'student', label: '👦 Student' },
+                          { key: 'parent', label: '👨‍👩‍👧 Parent' },
+                          { key: 'both', label: '👥 Both' }
+                        ].map(t => (
+                          <button
+                            key={`target_btn_${t.key}`}
+                            type="button"
+                            onClick={() => updateCategoryConfig(curCat, { target: t.key as any })}
+                            style={{
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              backgroundColor: curCfg.target === t.key ? '#ffffff' : 'transparent',
+                              color: curCfg.target === t.key ? '#0f172a' : '#64748b',
+                              boxShadow: curCfg.target === t.key ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
+                            }}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Two Message Boxes: Student and Parent */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                    
+                    {/* 1. Student Message Box */}
+                    <div style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      border: curCfg.student_message.trim() ? '1.5px solid #6366f1' : '1px solid #e2e8f0',
+                      backgroundColor: (curCfg.target === 'student' || curCfg.target === 'both') ? '#faf5ff' : '#f8fafc',
+                      opacity: (curCfg.target === 'student' || curCfg.target === 'both') ? 1 : 0.5,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                          <Users size={16} color="#4f46e5" /> 1. Student WhatsApp Message
+                        </label>
+                        {(curCfg.target === 'student' || curCfg.target === 'both') && curCfg.student_message.trim() && (
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#4f46e5', backgroundColor: '#ede9fe', padding: '2px 6px', borderRadius: '4px' }}>
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={curCfg.student_message}
+                        onChange={e => updateCategoryConfig(curCat, { student_message: e.target.value })}
+                        placeholder={`e.g. Dear {name}, you were marked ${curInfo.label} for {session_name} on {date}.`}
+                        style={{ 
+                          width: '100%', 
+                          resize: 'vertical',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '13px',
+                          fontFamily: 'inherit',
+                          backgroundColor: '#ffffff'
+                        }}
+                      />
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>Tags:</span>
+                        {['{name}', '{session_name}', '{date}', '{floor}', '{room}', '{reason}', '{status}'].map(tag => (
+                          <button
+                            key={`tag_student_${curCat}_${tag}`}
+                            type="button"
+                            onClick={() => {
+                              const next = curCfg.student_message + (curCfg.student_message ? ' ' : '') + tag;
+                              updateCategoryConfig(curCat, { student_message: next });
+                            }}
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              border: '1px solid #cbd5e1',
+                              background: '#ffffff',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              color: '#4338ca'
+                            }}
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 2. Parent Message Box */}
+                    <div style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      border: curCfg.parent_message.trim() ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                      backgroundColor: (curCfg.target === 'parent' || curCfg.target === 'both') ? '#f0fdf4' : '#f8fafc',
+                      opacity: (curCfg.target === 'parent' || curCfg.target === 'both') ? 1 : 0.5,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                          <Phone size={16} color="#10b981" /> 2. Parent WhatsApp Message
+                        </label>
+                        {(curCfg.target === 'parent' || curCfg.target === 'both') && curCfg.parent_message.trim() && (
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', backgroundColor: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={curCfg.parent_message}
+                        onChange={e => updateCategoryConfig(curCat, { parent_message: e.target.value })}
+                        placeholder={`e.g. Respected Parent, your ward {name} (Room {room}) was marked ${curInfo.label} for {session_name} attendance on {date} at AVD Hostel.`}
+                        style={{ 
+                          width: '100%', 
+                          resize: 'vertical',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '13px',
+                          fontFamily: 'inherit',
+                          backgroundColor: '#ffffff'
+                        }}
+                      />
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>Tags:</span>
+                        {['{name}', '{session_name}', '{date}', '{floor}', '{room}', '{reason}', '{status}'].map(tag => (
+                          <button
+                            key={`tag_parent_${curCat}_${tag}`}
+                            type="button"
+                            onClick={() => {
+                              const next = curCfg.parent_message + (curCfg.parent_message ? ' ' : '') + tag;
+                              updateCategoryConfig(curCat, { parent_message: next });
+                            }}
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              border: '1px solid #cbd5e1',
+                              background: '#ffffff',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              color: '#059669'
+                            }}
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Bottom Controls */}
             <div style={{ 
@@ -952,8 +1172,8 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   type="button"
-                  onClick={sendInstantAbsentAlerts}
-                  disabled={sendingAlerts || (!autoMessageStudent.trim() && !autoMessageParent.trim())}
+                  onClick={sendInstantSessionAlerts}
+                  disabled={sendingAlerts || !Object.values(alertsConfig).some(c => c.enabled)}
                   style={{
                     padding: '10px 18px',
                     borderRadius: '10px',
@@ -961,15 +1181,15 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                     background: '#ecfdf5',
                     color: '#065f46',
                     fontWeight: 700,
-                    cursor: (sendingAlerts || (!autoMessageStudent.trim() && !autoMessageParent.trim())) ? 'not-allowed' : 'pointer',
+                    cursor: (sendingAlerts || !Object.values(alertsConfig).some(c => c.enabled)) ? 'not-allowed' : 'pointer',
                     fontSize: '13px',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    opacity: (!autoMessageStudent.trim() && !autoMessageParent.trim()) ? 0.6 : 1
+                    opacity: !Object.values(alertsConfig).some(c => c.enabled) ? 0.6 : 1
                   }}
                 >
-                  <Send size={15} /> {sendingAlerts ? 'Sending Alerts...' : 'Send Absent Alert Now'}
+                  <Send size={15} /> {sendingAlerts ? 'Sending Alerts...' : 'Send Session Alerts Now'}
                 </button>
 
                 <button

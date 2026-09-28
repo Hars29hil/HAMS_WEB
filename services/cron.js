@@ -46,7 +46,7 @@ async function getAllStudentTokens() {
 cron.schedule('* * * * *', async () => {
   try {
     const [schedules] = await pool.query(
-      'SELECT session_key, session_name, start_time, end_time, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, is_for_all_students FROM attendance_schedules WHERE is_active = TRUE'
+      'SELECT session_key, session_name, start_time, end_time, late_time, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config, last_auto_message_date, is_for_all_students FROM attendance_schedules WHERE is_active = TRUE'
     );
     
     const now = getCurrentIST();
@@ -76,17 +76,37 @@ cron.schedule('* * * * *', async () => {
         }
       }
 
-      const startTimeMs = startDt.getTime();
-      const endTimeMs = endDt.getTime();
-      const tenMinsBeforeEndMs = endTimeMs - (10 * 60000);
+      const sessionName = schedule.session_name || (schedule.session_key.charAt(0).toUpperCase() + schedule.session_key.slice(1));
 
-      const sessionName = schedule.session_key.charAt(0).toUpperCase() + schedule.session_key.slice(1);
+      let activeConfig = null;
+      if (schedule.auto_alerts_config) {
+        try {
+          activeConfig = typeof schedule.auto_alerts_config === 'string' ? JSON.parse(schedule.auto_alerts_config) : schedule.auto_alerts_config;
+        } catch(e) {
+          activeConfig = null;
+        }
+      }
 
-      const studentTpl = (schedule.auto_message_student || schedule.auto_message || '').trim();
-      const parentTpl = (schedule.auto_message_parent || '').trim();
+      if (!activeConfig || typeof activeConfig !== 'object') {
+        const sTpl = (schedule.auto_message_student || schedule.auto_message || '').trim();
+        const pTpl = (schedule.auto_message_parent || '').trim();
+        activeConfig = {
+          absent: {
+            enabled: Boolean(sTpl || pTpl),
+            target: (sTpl && pTpl) ? 'both' : (pTpl ? 'parent' : 'student'),
+            student_message: sTpl,
+            parent_message: pTpl
+          },
+          late: { enabled: false, target: 'both', student_message: '', parent_message: '' },
+          leave: { enabled: false, target: 'both', student_message: '', parent_message: '' },
+          present: { enabled: false, target: 'both', student_message: '', parent_message: '' }
+        };
+      }
 
-      // Auto-Message Logic for Absent Students
-      if ((studentTpl || parentTpl) && schedule.auto_message_time) {
+      // Check if any category is enabled
+      const hasAnyAlertEnabled = Object.values(activeConfig).some((c) => c && c.enabled);
+
+      if (hasAnyAlertEnabled && schedule.auto_message_time) {
         const [amH, amM] = schedule.auto_message_time.split(':').map(Number);
         let amDt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), amH, amM, 0));
         
@@ -98,14 +118,14 @@ cron.schedule('* * * * *', async () => {
         const lastSentDate = schedule.last_auto_message_date ? new Date(schedule.last_auto_message_date).toISOString().slice(0, 10) : null;
 
         if (nowTime === amDt.getTime() && lastSentDate !== sessionDate) {
-          console.log(`[Cron] Triggering Auto-Message for absent students/parents in ${sessionName}...`);
+          console.log(`[Cron] Triggering Automated WhatsApp Alerts for ${sessionName} on ${sessionDate}...`);
           try {
             await pool.query('UPDATE attendance_schedules SET last_auto_message_date = ? WHERE session_key = ?', [sessionDate, schedule.session_key]);
 
             const isForAll = schedule.is_for_all_students === 1 || schedule.is_for_all_students === true || schedule.is_for_all_students === null || schedule.is_for_all_students === undefined;
 
             let targetFilterClause = '';
-            const targetFilterParams = [sessionDate, schedule.session_key];
+            const targetFilterParams = [];
 
             if (!isForAll) {
               const [targetRows] = await pool.query('SELECT student_ids FROM floor_session_targets WHERE session_key = ? AND target_type = "SELECTED"', [schedule.session_key]);
@@ -121,7 +141,7 @@ cron.schedule('* * * * *', async () => {
               }
 
               if (assignedStudentIds.length === 0) {
-                console.log(`[Cron] No students assigned to selective session ${sessionName}. Skipping absent messages.`);
+                console.log(`[Cron] No students assigned to selective session ${sessionName}. Skipping automated alerts.`);
                 continue;
               }
 
@@ -129,8 +149,10 @@ cron.schedule('* * * * *', async () => {
               targetFilterParams.push(assignedStudentIds, assignedStudentIds, assignedStudentIds);
             }
 
-            const query = `
+            // Fetch eligible students
+            const [students] = await pool.query(`
               SELECT 
+                s.id,
                 s.phone_number as phone, 
                 s.father_phone as fatherPhone,
                 s.mother_phone as motherPhone,
@@ -140,61 +162,122 @@ cron.schedule('* * * * *', async () => {
                 s.room_number as roomNumber, 
                 s.floor_id as floorId
               FROM students s
-              WHERE s.is_active = TRUE
-              AND TRIM(LEADING '0' FROM s.student_code) NOT IN (
-                SELECT TRIM(LEADING '0' FROM r.bank_code)
-                FROM attendance_records r
-                JOIN attendance_sessions ses ON r.session_id = ses.id
-                WHERE ses.session_date = ? AND LOWER(ses.session_type) = LOWER(?)
-              )
-              ${targetFilterClause}
-            `;
-            const [targetStudents] = await pool.query(query, targetFilterParams);
+              WHERE s.is_active = TRUE ${targetFilterClause}
+            `, targetFilterParams);
 
-            console.log(`[Cron] Found ${targetStudents.length} absent students to notify for ${sessionName}`);
+            // Fetch attendance records for this date
+            const [records] = await pool.query(`
+              SELECT ar.student_id, TRIM(LEADING '0' FROM ar.bank_code) as clean_bank_code, ar.bank_code, ar.created_at, ar.status as record_status
+              FROM attendance_records ar
+              JOIN attendance_sessions ses ON ar.session_id = ses.id
+              WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
+            `, [sessionDate, sessionDate, schedule.session_key]);
+
+            const recordMap = new Map();
+            records.forEach(r => {
+              if (r.student_id) recordMap.set(String(r.student_id), r);
+              if (r.clean_bank_code) recordMap.set(String(r.clean_bank_code), r);
+              if (r.bank_code) recordMap.set(String(r.bank_code).trim(), r);
+            });
+
+            // Fetch approved student leaves
+            const [leaves] = await pool.query(`
+              SELECT student_id, TRIM(LEADING '0' FROM bank_code) as clean_bank_code, bank_code, reason
+              FROM student_leaves
+              WHERE status = 'approved' AND ? BETWEEN DATE(start_time) AND DATE(end_time)
+            `, [sessionDate]);
+
+            const leaveMap = new Map();
+            leaves.forEach(l => {
+              if (l.student_id) leaveMap.set(String(l.student_id), l);
+              if (l.clean_bank_code) leaveMap.set(String(l.clean_bank_code), l);
+              if (l.bank_code) leaveMap.set(String(l.bank_code).trim(), l);
+            });
+
+            const categorized = { absent: [], late: [], leave: [], present: [] };
+            const lateTime = schedule.late_time || null;
+
+            for (const student of students) {
+              const cleanCode = String(student.bankCode || '').replace(/^0+/, '');
+              const rec = recordMap.get(String(student.id)) || (cleanCode ? recordMap.get(cleanCode) : null) || recordMap.get(String(student.bankCode));
+              const lev = leaveMap.get(String(student.id)) || (cleanCode ? leaveMap.get(cleanCode) : null) || leaveMap.get(String(student.bankCode));
+
+              let status = 'absent';
+              let reason = '';
+
+              if (rec) {
+                if (rec.record_status === 'Late') {
+                  status = 'late';
+                } else if (lateTime && rec.created_at) {
+                  const recTime = new Date(rec.created_at).toISOString().slice(11, 16);
+                  status = recTime >= lateTime ? 'late' : 'present';
+                } else {
+                  status = 'present';
+                }
+              } else if (lev) {
+                status = 'leave';
+                reason = lev.reason || 'Approved Leave';
+              } else {
+                status = 'absent';
+              }
+
+              categorized[status].push({ ...student, status, reason });
+            }
 
             const formatMsg = (tpl, student) => {
               let msg = tpl;
               msg = msg.replace(/{name}/gi, student.name || 'Student');
               msg = msg.replace(/{student_name}/gi, student.name || 'Student');
-              msg = msg.replace(/{session_name}/gi, schedule.session_name || sessionName);
+              msg = msg.replace(/{session_name}/gi, sessionName);
               msg = msg.replace(/{date}/gi, sessionDate);
               msg = msg.replace(/{room}/gi, student.roomNumber || 'N/A');
-              msg = msg.replace(/{room number}/gi, student.roomNumber || 'N/A');
               msg = msg.replace(/{floor}/gi, student.floorId !== undefined ? `Floor ${student.floorId}` : '');
+              msg = msg.replace(/{reason}/gi, student.reason || '');
+              msg = msg.replace(/{status}/gi, student.status ? student.status.toUpperCase() : '');
               msg = msg.replace(/{student_phone}/gi, student.phone || '');
-              msg = msg.replace(/{parent_phone}/gi, student.parentPhone || student.fatherPhone || '');
+              msg = msg.replace(/{parent_phone}/gi, student.parentPhone || student.fatherPhone || student.motherPhone || '');
               return msg;
             };
 
-            for (const student of targetStudents) {
-              // 1. Send to Student if student template is configured
-              if (studentTpl && student.phone) {
-                const sMsg = formatMsg(studentTpl, student);
-                try {
-                  await sendMessage(student.phone, sMsg);
-                  console.log(`[Cron] Sent absent alert to student ${student.name} (${student.phone})`);
-                } catch (waErr) {
-                  console.error(`[Cron] Failed to send student auto-message to ${student.phone}:`, waErr.message);
-                }
-                await new Promise(resolve => setTimeout(resolve, 1200 + Math.random() * 800));
-              }
+            const categories = ['absent', 'late', 'leave', 'present'];
+            for (const cat of categories) {
+              const cfg = activeConfig[cat];
+              if (!cfg || !cfg.enabled) continue;
 
-              // 2. Send to Parent if parent template is configured
-              const parentDestination = student.parentPhone || student.fatherPhone || student.motherPhone;
-              if (parentTpl && parentDestination) {
-                const pMsg = formatMsg(parentTpl, student);
-                try {
-                  await sendMessage(parentDestination, pMsg);
-                  console.log(`[Cron] Sent absent alert for ${student.name} to parent (${parentDestination})`);
-                } catch (waErr) {
-                  console.error(`[Cron] Failed to send parent auto-message to ${parentDestination}:`, waErr.message);
+              const targetAudience = cfg.target || 'both';
+              const sTpl = (cfg.student_message || '').trim();
+              const pTpl = (cfg.parent_message || '').trim();
+              const studentList = categorized[cat] || [];
+
+              console.log(`[Cron][${sessionName}] Sending alerts for "${cat}" (${studentList.length} students, target: ${targetAudience})`);
+
+              for (const student of studentList) {
+                if ((targetAudience === 'student' || targetAudience === 'both') && sTpl && student.phone) {
+                  const sMsg = formatMsg(sTpl, student);
+                  try {
+                    await sendMessage(student.phone, sMsg);
+                    console.log(`[Cron][${cat}] Sent student alert to ${student.name} (${student.phone})`);
+                  } catch (waErr) {
+                    console.error(`[Cron][${cat}] Error sending student message:`, waErr.message);
+                  }
+                  await new Promise(resolve => setTimeout(resolve, 1200 + Math.random() * 800));
                 }
-                await new Promise(resolve => setTimeout(resolve, 1200 + Math.random() * 800));
+
+                const parentDestination = student.parentPhone || student.fatherPhone || student.motherPhone;
+                if ((targetAudience === 'parent' || targetAudience === 'both') && pTpl && parentDestination) {
+                  const pMsg = formatMsg(pTpl, student);
+                  try {
+                    await sendMessage(parentDestination, pMsg);
+                    console.log(`[Cron][${cat}] Sent parent alert for ${student.name} to parent (${parentDestination})`);
+                  } catch (waErr) {
+                    console.error(`[Cron][${cat}] Error sending parent message:`, waErr.message);
+                  }
+                  await new Promise(resolve => setTimeout(resolve, 1200 + Math.random() * 800));
+                }
               }
             }
           } catch(e) {
-            console.error(`[Cron] Error executing Auto-Message for ${sessionName}:`, e);
+            console.error(`[Cron] Error executing automated alert for ${sessionName}:`, e);
           }
         }
       }

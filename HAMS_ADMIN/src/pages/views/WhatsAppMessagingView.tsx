@@ -142,10 +142,11 @@ export const WhatsAppMessagingView: React.FC = () => {
         const map: Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }> = {};
         for (const item of res.data.data) {
           const entry = {
-            status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : (item.leave_id ? 'Leave' : 'Absent')),
+            status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : (item.leave_id ? 'Leave' : (item.session_started === false ? 'Not Started' : 'Absent'))),
             marked_at: item.marked_at,
             is_late: Boolean(item.is_late),
-            reason: item.reason || item.absent_reason || item.leave_reason || null
+            reason: item.reason || item.absent_reason || item.leave_reason || null,
+            session_started: item.session_started
           };
 
           if (item.student_id !== undefined && item.student_id !== null) {
@@ -342,15 +343,16 @@ export const WhatsAppMessagingView: React.FC = () => {
       }
     }
 
-    // 3. Status filter (Absent / Present / Late / Leave)
+    // 3. Status filter (Absent / Present / Late / Leave / Not Started)
     if (statusFilter !== 'all') {
       const att = getStudentAttendance(s);
-      const currentStatus = att && att.status ? att.status.toLowerCase() : 'absent';
+      const currentStatus = att && att.status ? att.status.toLowerCase() : 'not started';
       
       if (statusFilter === 'absent' && currentStatus !== 'absent') return false;
       if (statusFilter === 'present' && currentStatus !== 'present') return false;
       if (statusFilter === 'late' && currentStatus !== 'late') return false;
       if (statusFilter === 'leave' && currentStatus !== 'leave') return false;
+      if (statusFilter === 'not_started' && currentStatus !== 'not started') return false;
     }
 
     return true;
@@ -778,11 +780,12 @@ export const WhatsAppMessagingView: React.FC = () => {
                   backgroundColor: '#ffffff'
                 }}
               >
-                <option value="all">All (Present, Late, Absent & Leave)</option>
-                <option value="absent">🔴 Absent Only</option>
+                <option value="all">All (Present, Late, Absent, Leave & Pending)</option>
                 <option value="present">🟢 Present Only</option>
                 <option value="late">🟡 Late Only</option>
+                <option value="absent">🔴 Absent Only</option>
                 <option value="leave">🏖️ Leave Only</option>
+                <option value="not_started">⏳ Not Started / Pending</option>
               </select>
             </div>
 
@@ -839,10 +842,11 @@ export const WhatsAppMessagingView: React.FC = () => {
                   const sCode = String(s.student_code || s.id);
                   const isSelected = selectedStudentIds.has(sCode);
                   const att = getStudentAttendance(s);
-                  const currentStatus = att ? (att.status || 'Absent') : 'Absent';
+                  const currentStatus = att ? (att.status || 'Not Started') : 'Not Started';
                   const isPresent = currentStatus.toLowerCase() === 'present';
                   const isLate = currentStatus.toLowerCase() === 'late';
                   const isLeave = currentStatus.toLowerCase() === 'leave';
+                  const isNotStarted = currentStatus.toLowerCase() === 'not started';
 
                   let badgeBg = '#fef2f2';
                   let badgeColor = '#991b1b';
@@ -864,6 +868,11 @@ export const WhatsAppMessagingView: React.FC = () => {
                     badgeColor = '#1d4ed8';
                     badgeBorder = '#bfdbfe';
                     badgeLabel = '🏖️ Leave';
+                  } else if (isNotStarted) {
+                    badgeBg = '#f1f5f9';
+                    badgeColor = '#64748b';
+                    badgeBorder = '#e2e8f0';
+                    badgeLabel = '⏳ Not Started';
                   }
 
                   return (
