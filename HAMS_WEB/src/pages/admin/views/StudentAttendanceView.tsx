@@ -133,12 +133,19 @@ export const StudentAttendanceView: React.FC = () => {
       let studentRecords = reportData.studentRecords || {};
       let record = studentRecords[bankCodeStr] || studentRecords[cleanCode];
       
+      let leaveRecords = reportData.leaveRecords || {};
+      let studentLeave = leaveRecords[bankCodeStr] || leaveRecords[cleanCode] || {};
+
       let attended = 0;
+      let totalLeaves = 0;
       if (record) {
         activeTypes.forEach(type => {
           attended += (record[type] || 0);
         });
       }
+      activeTypes.forEach(type => {
+        totalLeaves += (studentLeave[type] || 0);
+      });
       
       const lateRecords = reportData.lateRecords || {};
       let lateCount = lateRecords[bankCodeStr] || lateRecords[cleanCode] || 0;
@@ -147,13 +154,19 @@ export const StudentAttendanceView: React.FC = () => {
       if (statusFilter === 'absent' && attended > 0) return;
       if (statusFilter === 'late' && lateCount === 0) return;
 
-      const percentage = totalPossible > 0 ? (attended / totalPossible) * 100 : 0;
+      const effectiveTotal = Math.max(0, totalPossible - totalLeaves);
+      const percentage = effectiveTotal > 0 
+        ? (attended / effectiveTotal) * 100 
+        : (totalPossible > 0 && totalLeaves >= totalPossible ? 100 : 0);
+
       let breakdown: any = {};
       activeTypes.forEach(type => {
         const tAtt = record ? (record[type] || 0) : 0;
         const tTot = totals[type] || 0;
-        const tPerc = tTot > 0 ? (tAtt / tTot) * 100 : 0;
-        breakdown[type] = { attended: tAtt, total: tTot, percentage: tPerc };
+        const tLeaves = studentLeave[type] || 0;
+        const tEffective = Math.max(0, tTot - tLeaves);
+        const tPerc = tEffective > 0 ? (tAtt / tEffective) * 100 : (tTot > 0 && tLeaves >= tTot ? 100 : 0);
+        breakdown[type] = { attended: tAtt, total: tTot, leaves: tLeaves, effectiveTotal: tEffective, percentage: tPerc };
       });
 
       filteredList.push({
@@ -165,6 +178,8 @@ export const StudentAttendanceView: React.FC = () => {
         floorName: floorName || null,
         tags: student.tags || [],
         attended,
+        leaves: totalLeaves,
+        effectiveTotal,
         total: totalPossible,
         percentage,
         breakdown
@@ -229,9 +244,9 @@ export const StudentAttendanceView: React.FC = () => {
     const data = getFilteredData();
     if (data.length === 0) return;
 
-    let csv = 'Bank Code,Name,Floor,Room,Group,Attended,Total,Percentage\n';
+    let csv = 'Bank Code,Name,Floor,Room,Group,Attended,Leaves,Effective Days,Total Days,Percentage\n';
     data.forEach(item => {
-      csv += `${item.bankCode},"${item.name}","${item.floorName || ''}","${item.roomNo || ''}","${item.group}",${item.attended},${item.total},${item.percentage.toFixed(1)}%\n`;
+      csv += `${item.bankCode},"${item.name}","${item.floorName || ''}","${item.roomNo || ''}","${item.group}",${item.attended},${item.leaves},${item.effectiveTotal},${item.total},${item.percentage.toFixed(1)}%\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -435,6 +450,28 @@ export const StudentAttendanceView: React.FC = () => {
                             🏷️ {item.percentage >= 75 ? 'Regular' : item.percentage > 0 ? 'Irregular' : 'Defaulter'}
                           </span>
                         )}
+
+                        {/* Approved Leaves Badge */}
+                        {item.leaves > 0 && (
+                          <span
+                            style={{
+                              padding: '3px 9px',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              backgroundColor: '#eff6ff',
+                              color: '#2563eb',
+                              border: '1.5px solid #bfdbfe',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              boxShadow: '0 1px 2px rgba(37,99,235,0.08)'
+                            }}
+                            title={`${item.leaves} approved leave session(s) deducted from ${item.total} total sessions`}
+                          >
+                            🌴 {item.leaves} {item.leaves === 1 ? 'Leave' : 'Leaves'}
+                          </span>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
@@ -496,11 +533,16 @@ export const StudentAttendanceView: React.FC = () => {
                   </div>
 
                   <div className="row-stats">
-                    <div className="stats-text">
+                    <div className="stats-text" style={{ textAlign: 'right' }}>
                       <span className="percentage" style={{ color: isGood ? '#22c55e' : '#ef4444' }}>
                         {item.percentage.toFixed(1)}%
                       </span>
-                      <span className="count">{item.attended} / {item.total}</span>
+                      <span className="count">{item.attended} / {item.effectiveTotal}</span>
+                      {item.leaves > 0 && (
+                        <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 600, display: 'block' }}>
+                          ({item.leaves} leave{item.leaves > 1 ? 's' : ''} deducted)
+                        </span>
+                      )}
                     </div>
                     {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </div>
@@ -515,8 +557,13 @@ export const StudentAttendanceView: React.FC = () => {
                         <div key={type} className="breakdown-item">
                           <span className="type-name">{type.toUpperCase()}</span>
                           <span className="type-stat" style={{ color: dGood ? '#22c55e' : '#ef4444' }}>
-                            {detail.attended} / {detail.total} ({detail.percentage.toFixed(1)}%)
+                            {detail.attended} / {detail.effectiveTotal} ({detail.percentage.toFixed(1)}%)
                           </span>
+                          {detail.leaves > 0 && (
+                            <span style={{ fontSize: '11px', color: '#2563eb', display: 'block', marginTop: '2px', fontWeight: 600 }}>
+                              🌴 {detail.leaves} on leave • {detail.total} total
+                            </span>
+                          )}
                         </div>
                       );
                     })}

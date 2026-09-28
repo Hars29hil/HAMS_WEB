@@ -128,7 +128,31 @@ router.get('/dashboard', async (req, res) => {
       late_today = lateRow ? parseInt(lateRow.late_today || 0, 10) : 0;
     }
 
-    const absent_today = Math.max(0, total_students - present_today);
+    let isSessionConductedOrStarted = false;
+    if (present_today > 0) {
+      isSessionConductedOrStarted = true;
+    } else {
+      const nowIST = getCurrentIST();
+      const todayStr = `${nowIST.getFullYear()}-${String(nowIST.getMonth() + 1).padStart(2, '0')}-${String(nowIST.getDate()).padStart(2, '0')}`;
+      
+      if (targetDate === todayStr && activeFilterKey !== 'all') {
+        const foundSched = schedules.find(s => s.session_key === activeFilterKey);
+        if (foundSched && foundSched.start_time && foundSched.end_time) {
+          const nowMins = nowIST.getHours() * 60 + nowIST.getMinutes();
+          const [sH, sM] = (foundSched.start_time || '00:00').split(':').map(Number);
+          const [eH, eM] = (foundSched.end_time || '23:59').split(':').map(Number);
+          const startMins = sH * 60 + sM;
+          const endMins = eH * 60 + eM;
+          if (startMins < endMins) {
+            if (nowMins >= startMins) isSessionConductedOrStarted = true;
+          } else {
+            if (nowMins >= startMins || nowMins <= endMins) isSessionConductedOrStarted = true;
+          }
+        }
+      }
+    }
+
+    const absent_today = isSessionConductedOrStarted ? Math.max(0, total_students - present_today) : 0;
 
     // 5. Compute summary for each available session on targetDate
     let allSessionsQuery = `
@@ -139,11 +163,6 @@ router.get('/dashboard', async (req, res) => {
       WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (st.is_active = TRUE OR ar.bank_code IS NULL)
     `;
     const allSessionsParams = [targetDate, targetDate];
-    if (leaderFloors && leaderFloors.length > 0) {
-      allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
-      allSessionsParams.push(leaderFloors);
-    }
-    allSessionsQuery += ' GROUP BY s.session_type';
     if (leaderFloors && leaderFloors.length > 0) {
       allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
       allSessionsParams.push(leaderFloors);
@@ -195,7 +214,7 @@ router.get('/dashboard', async (req, res) => {
         COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present,
         SUM(CASE WHEN ar.is_late = TRUE THEN 1 ELSE 0 END) AS late
       FROM attendance_sessions s
-      LEFT JOIN attendance_records ar ON s.id = ar.session_id
+      JOIN attendance_records ar ON s.id = ar.session_id
       LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
       WHERE s.session_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? AND (st.is_active = TRUE OR ar.bank_code IS NULL)
     `;
@@ -288,14 +307,19 @@ router.get('/dashboard', async (req, res) => {
       };
     });
 
-    // 8. Find students absent for the last 3 occurrences of the selected session on or before targetDate
-    let distinctDatesQuery = 'SELECT DISTINCT session_date FROM attendance_sessions WHERE session_date <= ?';
-    const distinctDatesParams = [targetDate];
+    // 8. Find students absent for the last 3 actual occurrences of the selected session on or before targetDate
+    let distinctDatesQuery = `
+      SELECT DISTINCT ses.session_date 
+      FROM attendance_sessions ses
+      JOIN attendance_records ar ON ses.id = ar.session_id
+      WHERE (ses.session_date <= ? OR DATE(ses.session_date) <= ?)
+    `;
+    const distinctDatesParams = [targetDate, targetDate];
     if (activeFilterKey !== 'all') {
-      distinctDatesQuery += ' AND session_type = ?';
+      distinctDatesQuery += ' AND ses.session_type = ?';
       distinctDatesParams.push(activeFilterKey);
     }
-    distinctDatesQuery += ' ORDER BY session_date DESC LIMIT 3';
+    distinctDatesQuery += ' ORDER BY ses.session_date DESC LIMIT 3';
 
     let distinctDatesRows = [];
     try {
@@ -308,13 +332,9 @@ router.get('/dashboard', async (req, res) => {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     });
 
-    if (targetDates.length === 0) {
-      const baseDate = new Date(targetDate);
-      targetDates = [0, 1, 2].map(offset => {
-        const d = new Date(baseDate);
-        d.setDate(d.getDate() - offset);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      });
+    // Only compute consecutive defaulters if at least 3 distinct conducted sessions exist in history
+    if (targetDates.length < 3) {
+      targetDates = [];
     }
 
     let activeStudentsQuery = `
@@ -858,22 +878,24 @@ router.get('/reports', async (req, res) => {
       attendanceParams.push(leaderFloors);
     }
 
-    // 1. Get total counts per session type
-    const [sessionCounts] = await pool.query(`
-      SELECT session_type, COUNT(id) as total
-      FROM attendance_sessions
-      ${dateConditionSessions}
-      GROUP BY session_type
-    `, sessionCountsParams);
+    // 1. Get conducted sessions and total counts per session type
+    const [conductedSessions] = await pool.query(`
+      SELECT DISTINCT s.id, s.session_type, DATE_FORMAT(s.session_date, '%Y-%m-%d') as session_date
+      FROM attendance_sessions s
+      JOIN attendance_records ar ON s.id = ar.session_id
+      ${dateConditionAttendance.replace(/ar\.floor_id/g, 'ar.floor_id')}
+    `, attendanceParams);
     
     const totals = {};
-    sessionCounts.forEach(s => {
-      if(s.session_type) totals[s.session_type] = s.total;
-    });
+    for (const cs of conductedSessions) {
+      if (cs.session_type) {
+        totals[cs.session_type] = (totals[cs.session_type] || 0) + 1;
+      }
+    }
 
     // 2. Get attendance counts per student per session type
     const [attendance] = await pool.query(`
-      SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, s.session_type, COUNT(*) as attended, SUM(ar.is_late) as late_count
+      SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, s.session_type, COUNT(DISTINCT s.id) as attended, SUM(ar.is_late) as late_count
       FROM attendance_records ar
       JOIN attendance_sessions s ON ar.session_id = s.id
       ${dateConditionAttendance}
@@ -913,6 +935,56 @@ router.get('/reports', async (req, res) => {
     studentQuery += ' ORDER BY s.floor_id ASC, s.room_number ASC, s.name ASC';
 
     const [students] = await pool.query(studentQuery, studentQueryParams);
+
+    // Map student lookup tables
+    const studentIdToCleanCode = new Map();
+    for (const s of students) {
+      const clean = (s.student_code ? String(s.student_code).replace(/^0+/, '') : '') || String(s.id);
+      studentIdToCleanCode.set(s.id, clean);
+    }
+
+    // 3.5 Fetch approved leaves for conducted sessions
+    const leaveRecords = {};
+    try {
+      const [leaveRows] = await pool.query(`
+        SELECT student_id, TRIM(LEADING '0' FROM bank_code) as bank_code, DATE_FORMAT(start_time, '%Y-%m-%d') as start_date, DATE_FORMAT(end_time, '%Y-%m-%d') as end_date, reason
+        FROM student_leaves
+        WHERE LOWER(status) = 'approved'
+      `);
+
+      const studentLeaveSessions = new Map();
+
+      for (const lv of leaveRows) {
+        let clean = lv.bank_code;
+        if (!clean && lv.student_id) {
+          clean = studentIdToCleanCode.get(lv.student_id);
+        }
+        if (!clean) continue;
+
+        if (!studentLeaveSessions.has(clean)) {
+          studentLeaveSessions.set(clean, new Map());
+        }
+        const sessionMap = studentLeaveSessions.get(clean);
+
+        for (const cs of conductedSessions) {
+          if (cs.session_date >= lv.start_date && cs.session_date <= lv.end_date) {
+            sessionMap.set(cs.id, cs.session_type);
+          }
+        }
+      }
+
+      for (const [clean, sessionMap] of studentLeaveSessions.entries()) {
+        if (!leaveRecords[clean]) leaveRecords[clean] = { total: 0 };
+        for (const [sId, sType] of sessionMap.entries()) {
+          leaveRecords[clean].total = (leaveRecords[clean].total || 0) + 1;
+          if (sType) {
+            leaveRecords[clean][sType] = (leaveRecords[clean][sType] || 0) + 1;
+          }
+        }
+      }
+    } catch (lvErr) {
+      console.warn('Manual leave fetch warning in reports:', lvErr.message);
+    }
 
     // 4. Fetch tags for these students
     const tagsMap = {};
@@ -970,19 +1042,23 @@ router.get('/reports', async (req, res) => {
         }
       }
 
+      const cleanCode = (s.student_code || '').replace(/^0+/, '');
+      const studentLeaves = leaveRecords[s.student_code] || leaveRecords[cleanCode] || {};
+      const totalLeaves = studentLeaves.total || 0;
+
       let studentTags = tagsMap[s.id] || tagsMap[s.student_code] || [];
       if (studentTags.length === 0 && aiTagsMap[s.id]) {
         studentTags = [aiTagsMap[s.id]];
       }
       if (studentTags.length === 0) {
-        const cleanCode = (s.student_code || '').replace(/^0+/, '');
         const rec = studentRecords[s.student_code] || studentRecords[cleanCode] || {};
         let totalAtt = 0;
         Object.values(rec).forEach(v => { totalAtt += (v || 0); });
 
         let totalPossible = 0;
         Object.values(totals || {}).forEach(v => { totalPossible += (v || 0); });
-        const rate = totalPossible > 0 ? (totalAtt / totalPossible) * 100 : 0;
+        const effectivePossible = Math.max(0, totalPossible - totalLeaves);
+        const rate = effectivePossible > 0 ? (totalAtt / effectivePossible) * 100 : (totalPossible > 0 && totalLeaves >= totalPossible ? 100 : 0);
 
         if (rate >= 75) {
           studentTags = [{
@@ -1009,7 +1085,7 @@ router.get('/reports', async (req, res) => {
       };
     });
 
-    return res.json({ success: true, totals, studentRecords, lateRecords, students: enrichedStudents });
+    return res.json({ success: true, totals, studentRecords, lateRecords, leaveRecords, students: enrichedStudents });
   } catch (err) {
     console.error('Reports Error:', err);
     return res.status(500).json({ success: false, message: err.toString() });
