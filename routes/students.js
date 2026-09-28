@@ -124,7 +124,7 @@ async function syncStudentsFromApi() {
       const phone = extStudent.phone ? String(extStudent.phone).trim() : canonicalUsername;
       const fatherPhone = extStudent.fatherPhone ? String(extStudent.fatherPhone).trim() : null;
       const motherPhone = extStudent.motherPhone ? String(extStudent.motherPhone).trim() : null;
-      const parentPhone = fatherPhone || motherPhone || null;
+      const parentPhone = fatherPhone || motherPhone || (extStudent.whatsAppNumber ? String(extStudent.whatsAppNumber).trim() : null);
       const dummyHash = '$2b$10$DKYfBMxGt00SY4/kwh1yeeGZChSF6/9uvosxdWV63dJe.AUQPPME6';
       
       // Try to insert them if they are new
@@ -138,9 +138,13 @@ async function syncStudentsFromApi() {
         // API has a room. Overwrite local completely.
         await pool.query(
           `UPDATE students 
-           SET room_number = ?, name = ?, is_active = 1, floor_id = ?, father_phone = ?, mother_phone = ?, parent_phone = ?, phone_number = COALESCE(phone_number, ?) 
-           WHERE student_code = ?`,
-          [roomValue, fullName, floorId, fatherPhone, motherPhone, parentPhone, phone, canonicalUsername]
+           SET room_number = ?, name = ?, is_active = 1, floor_id = ?, 
+               father_phone = COALESCE(?, father_phone), 
+               mother_phone = COALESCE(?, mother_phone), 
+               parent_phone = COALESCE(?, parent_phone), 
+               phone_number = COALESCE(phone_number, ?) 
+           WHERE student_code = ? OR TRIM(LEADING '0' FROM student_code) = TRIM(LEADING '0' FROM ?)`,
+          [roomValue, fullName, floorId, fatherPhone, motherPhone, parentPhone, phone, canonicalUsername, canonicalUsername]
         );
       } else {
         // API has NO room.
@@ -148,18 +152,25 @@ async function syncStudentsFromApi() {
           // They left the hostel. Deactivate them.
           await pool.query(
             `UPDATE students 
-             SET is_active = 0, room_number = NULL, floor_id = 0, name = ?, father_phone = ?, mother_phone = ?, parent_phone = ? 
-             WHERE student_code = ?`,
-            [fullName, fatherPhone, motherPhone, parentPhone, canonicalUsername]
+             SET is_active = 0, room_number = NULL, floor_id = 0, name = ?, 
+                 father_phone = COALESCE(?, father_phone), 
+                 mother_phone = COALESCE(?, mother_phone), 
+                 parent_phone = COALESCE(?, parent_phone) 
+             WHERE student_code = ? OR TRIM(LEADING '0' FROM student_code) = TRIM(LEADING '0' FROM ?)`,
+            [fullName, fatherPhone, motherPhone, parentPhone, canonicalUsername, canonicalUsername]
           );
         } else {
           // They don't have a room in API yet, but might have been added manually.
           // Just update their name and contact info, preserve their manual room/floor.
           await pool.query(
             `UPDATE students 
-             SET name = ?, father_phone = ?, mother_phone = ?, parent_phone = ?, phone_number = COALESCE(phone_number, ?) 
-             WHERE student_code = ?`,
-            [fullName, fatherPhone, motherPhone, parentPhone, phone, canonicalUsername]
+             SET name = ?, 
+                 father_phone = COALESCE(?, father_phone), 
+                 mother_phone = COALESCE(?, mother_phone), 
+                 parent_phone = COALESCE(?, parent_phone), 
+                 phone_number = COALESCE(phone_number, ?) 
+             WHERE student_code = ? OR TRIM(LEADING '0' FROM student_code) = TRIM(LEADING '0' FROM ?)`,
+            [fullName, fatherPhone, motherPhone, parentPhone, phone, canonicalUsername, canonicalUsername]
           );
         }
       }
@@ -181,7 +192,7 @@ router.get('/', async (req, res) => {
     await syncStudentsFromApi();
 
     // 2. Fetch all active students
-    let query = 'SELECT id AS student_id, name, floor_id, student_code, phone_number, assigned_mobile, room_number, is_default_present FROM students WHERE is_active = TRUE';
+    let query = 'SELECT id AS student_id, name, floor_id, student_code, phone_number, assigned_mobile, room_number, is_default_present, father_phone, mother_phone, parent_phone FROM students WHERE is_active = TRUE';
     let params = [];
     if (req.leader) {
       const leaderFloors = Array.isArray(req.leader.assigned_floors) && req.leader.assigned_floors.length > 0

@@ -391,7 +391,8 @@ export const StudentsView: React.FC = () => {
                   <div className="student-info">
                     <h4>{student.name}</h4>
                     <p>ID: {student.student_code || 'Unknown'}</p>
-                    <p>Mobile: {student.assigned_mobile || 'Unassigned'}</p>
+                    <p>Mobile: {student.assigned_mobile || student.phone_number || 'Unassigned'}</p>
+                    <p>Parent: {student.parent_phone || student.father_phone || student.mother_phone || 'None'}</p>
                   </div>
                   
                   <div className={`status-badge ${isAssigned ? 'assigned' : 'unassigned'}`}>

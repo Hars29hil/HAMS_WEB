@@ -865,9 +865,10 @@ export const StudentsManagementView: React.FC = () => {
                   </div>
                 </div>
 
-                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px', display: 'flex', gap: '12px' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                   <span>Room: <strong>{student.room_number || 'None'}</strong></span>
-                  <span>Mobile: <strong>{student.assigned_mobile || 'Unassigned'}</strong></span>
+                  <span>Mobile: <strong>{student.assigned_mobile || student.phone_number || 'Unassigned'}</strong></span>
+                  <span>Parent: <strong>{student.parent_phone || student.father_phone || student.mother_phone || 'None'}</strong></span>
                 </div>
 
                 {/* Assigned Tags List */}
