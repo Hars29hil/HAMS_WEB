@@ -14,12 +14,13 @@ import {
   Palmtree
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { renderSessionIcon } from '../utils/sessionIcons';
 import './AdminSidebar.css';
 
 interface AdminSidebarProps {
   isOpen: boolean;
   onCloseMobile: () => void;
-  sessions?: Array<{ session_key: string; session_name: string }>;
+  sessions?: Array<{ session_key: string; session_name: string; icon_name?: string }>;
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({
@@ -132,7 +133,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 className={`nav-item-btn ${pathname === `/session/${s.session_key}` ? 'active' : ''}`}
                 onClick={() => handleNavClick(`/session/${s.session_key}`)}
               >
-                <CalendarClock size={18} className="nav-icon" />
+                {renderSessionIcon(s.icon_name, s.session_key, 18, 'nav-icon')}
                 <span>{s.session_name}</span>
               </button>
             ))}

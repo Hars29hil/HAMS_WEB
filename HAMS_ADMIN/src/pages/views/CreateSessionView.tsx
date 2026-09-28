@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Moon, Sun, Users, Code, Book, Coffee, Activity, Calendar, PlusCircle } from 'lucide-react';
+import { Moon, Sun, Users, Code, Book, Coffee, Activity, Calendar, Bell, Flame, Sparkles, Smartphone } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
 
@@ -7,11 +7,15 @@ const ICONS = [
   { name: 'moon', icon: Moon, label: 'Night' },
   { name: 'sun', icon: Sun, label: 'Morning' },
   { name: 'users', icon: Users, label: 'Sabha' },
+  { name: 'bell', icon: Bell, label: 'Aarti / Bell' },
+  { name: 'flame', icon: Flame, label: 'Aarti / Deep' },
   { name: 'code', icon: Code, label: 'Coding' },
   { name: 'book', icon: Book, label: 'Study' },
   { name: 'coffee', icon: Coffee, label: 'Break' },
   { name: 'activity', icon: Activity, label: 'Sports' },
   { name: 'calendar', icon: Calendar, label: 'Event' },
+  { name: 'smartphone', icon: Smartphone, label: 'Mobile' },
+  { name: 'sparkles', icon: Sparkles, label: 'Special' },
 ];
 
 export const CreateSessionView: React.FC<{ onAdded?: () => void }> = ({ onAdded }) => {

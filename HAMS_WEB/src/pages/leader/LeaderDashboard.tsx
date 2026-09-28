@@ -1,5 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Users, Bell, Clock, BarChart3, Menu } from 'lucide-react';
+import { 
+  LogOut, 
+  Users, 
+  Bell, 
+  Clock, 
+  BarChart3, 
+  Menu,
+  Moon,
+  Sun,
+  Code,
+  Book,
+  Coffee,
+  Activity,
+  Calendar,
+  Flame,
+  Smartphone,
+  Sparkles
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Sidebar, SidebarItem } from '../../components/layout/Sidebar';
 import { StudentsView } from '../admin/views/StudentsView';
@@ -30,11 +47,46 @@ export const LeaderDashboard: React.FC = () => {
     }
   };
 
-  const getIcon = (name: string) => {
-    switch (name) {
-      case 'users': return Users;
-      case 'activity': return BarChart3;
-      default: return Clock;
+  const getIcon = (name?: string) => {
+    const iconKey = String(name || '').toLowerCase().trim();
+    switch (iconKey) {
+      case 'moon':
+      case 'night':
+        return Moon;
+      case 'sun':
+      case 'morning':
+        return Sun;
+      case 'users':
+      case 'sabha':
+        return Users;
+      case 'code':
+      case 'coding':
+        return Code;
+      case 'book':
+      case 'study':
+        return Book;
+      case 'coffee':
+      case 'break':
+        return Coffee;
+      case 'activity':
+      case 'sports':
+        return Activity;
+      case 'calendar':
+      case 'event':
+        return Calendar;
+      case 'bell':
+      case 'aarti':
+      case 'arti':
+        return Bell;
+      case 'flame':
+      case 'deep':
+        return Flame;
+      case 'smartphone':
+        return Smartphone;
+      case 'sparkles':
+        return Sparkles;
+      default:
+        return Clock;
     }
   };
 
