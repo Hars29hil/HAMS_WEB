@@ -4,6 +4,8 @@ const pool = require('../config/db');
 const leaveService = require('../services/leaveService');
 const { verifyAdmin, verifyAdminOrFloorLeader } = require('../middleware/auth');
 
+let lastLeaveSyncTime = 0;
+
 // ------------------------------------------------------------
 // GET /api/leaves
 // Returns list of student leaves with optional filtering
@@ -18,6 +20,21 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
       endDate, 
       active_only 
     } = req.query;
+
+    // On-demand background sync if specific dates are queried or if sync hasn't run in 30s
+    const nowMs = Date.now();
+    if (startDate || endDate || (nowMs - lastLeaveSyncTime > 30000)) {
+      lastLeaveSyncTime = nowMs;
+      const today = new Date();
+      const defaultStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const defaultEnd = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      leaveService.syncLeaves({
+        startDate: startDate || defaultStart,
+        endDate: endDate || defaultEnd
+      }).catch(err => {
+        console.warn('[Leaves API] On-demand sync warning:', err.message);
+      });
+    }
 
     let leaderFloors = null;
     if (req.leader) {
@@ -34,7 +51,8 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
              COALESCE(s.floor_id, f.floor_id) AS floor_id,
              f.floor_name,
              COALESCE(s.room_number, l.room) AS room_number,
-             COALESCE(s.phone_number, l.phone) AS phone,
+             COALESCE(s.assigned_mobile, s.phone_number, l.phone) AS phone,
+             s.parent_phone,
              l.aadhar,
              l.start_time,
              l.end_time,
@@ -58,14 +76,15 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
       params.push(status);
     }
 
-    if (startDate) {
-      query += ` AND l.end_time >= ?`;
-      params.push(`${startDate} 00:00:00`);
-    }
-
-    if (endDate) {
-      query += ` AND l.start_time <= ?`;
-      params.push(`${endDate} 23:59:59`);
+    if (startDate && endDate) {
+      query += ` AND (DATE(l.start_time) <= ? AND DATE(l.end_time) >= ?)`;
+      params.push(endDate, startDate);
+    } else if (startDate) {
+      query += ` AND DATE(l.end_time) >= ?`;
+      params.push(startDate);
+    } else if (endDate) {
+      query += ` AND DATE(l.start_time) <= ?`;
+      params.push(endDate);
     }
 
     if (floor_id && floor_id !== 'All') {

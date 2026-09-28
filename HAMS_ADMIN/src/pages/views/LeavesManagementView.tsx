@@ -33,10 +33,18 @@ export const LeavesManagementView: React.FC = () => {
   useEffect(() => {
     fetchLeaves();
     fetchStats();
-  }, [floorFilter, statusFilter, startDate, endDate]);
 
-  const fetchLeaves = async () => {
-    setLoading(true);
+    // Auto-poll every 8 seconds so newly synced leaves appear automatically without user clicking
+    const interval = setInterval(() => {
+      fetchLeaves(false); // silent refresh
+      fetchStats();
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [floorFilter, statusFilter, startDate, endDate, searchQuery]);
+
+  const fetchLeaves = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       let url = '/leaves?';
       const params: string[] = [];
@@ -54,7 +62,7 @@ export const LeavesManagementView: React.FC = () => {
     } catch (err: any) {
       console.error('Error fetching leaves:', err);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -65,6 +73,11 @@ export const LeavesManagementView: React.FC = () => {
         setStats(res.data.data);
       }
     } catch (e) {}
+  };
+
+  const handleClearDates = () => {
+    setStartDate('');
+    setEndDate('');
   };
 
   const handleManualSync = async () => {
@@ -380,6 +393,26 @@ export const LeavesManagementView: React.FC = () => {
                 }}
               />
             </div>
+
+            {(startDate || endDate) && (
+              <button
+                onClick={handleClearDates}
+                style={{
+                  height: '40px',
+                  padding: '0 14px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #e2e8f0',
+                  backgroundColor: '#f8fafc',
+                  color: '#ef4444',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+                title="Clear date filter to see all records"
+              >
+                Clear Dates ✕
+              </button>
+            )}
           </div>
 
           <span style={{

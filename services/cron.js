@@ -301,5 +301,24 @@ cron.schedule('59 23 * * 0', async () => {
   }
 });
 
-console.log('Push notification & Gemini AI cron service started.');
+// ------------------------------------------------------------
+// Automatic Leave Sync from Central College Portal (Every 2 Minutes)
+// ------------------------------------------------------------
+const leaveService = require('./leaveService');
+
+cron.schedule('*/2 * * * *', async () => {
+  try {
+    const today = new Date();
+    const past = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const future = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const result = await leaveService.syncLeaves({ startDate: past, endDate: future });
+    if (result && (result.inserted > 0 || result.updated > 0)) {
+      console.log(`[Cron] Auto leave sync: ${result.total} total (${result.inserted} added, ${result.updated} updated).`);
+    }
+  } catch (err) {
+    console.error('[Cron] Error in background leave sync:', err.message);
+  }
+});
+
+console.log('Push notification, Leave sync & Gemini AI cron service started.');
 

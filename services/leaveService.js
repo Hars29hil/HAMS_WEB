@@ -22,7 +22,7 @@ function fetchRemoteLeaves(startDate, endDate) {
         'x-hsh-auth-token': LEAVE_API_TOKEN,
         'User-Agent': 'HAMS-Leave-Sync/1.0'
       },
-      timeout: 10000
+      timeout: 30000
     };
 
     https.get(url, options, (res) => {
