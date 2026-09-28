@@ -10,10 +10,24 @@ const apiClient = axios.create({
   timeout: 15000,
 });
 
+// Helper to get or create persistent device uuid
+export function getOrCreateDeviceUuid(): string {
+  let uuid = localStorage.getItem('hams_device_uuid');
+  if (!uuid) {
+    uuid = 'dev_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now().toString(36);
+    localStorage.setItem('hams_device_uuid', uuid);
+  }
+  return uuid;
+}
+
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  const deviceUuid = getOrCreateDeviceUuid();
+  if (deviceUuid) {
+    config.headers['x-device-uuid'] = deviceUuid;
   }
   return config;
 }, (error) => {

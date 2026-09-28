@@ -97,7 +97,10 @@ router.post('/student/login', async (req, res) => {
         message: secCheck.message,
         primary_user: secCheck.primary_student?.name,
         attempted_user: secCheck.attempted_student?.name,
-        ip_address: secCheck.ip_address
+        ip_address: secCheck.ip_address,
+        bound_ip: secCheck.bound_ip,
+        device_uuid: secCheck.device_uuid,
+        bound_device_uuid: secCheck.bound_device_uuid
       });
     }
 
@@ -486,7 +489,10 @@ router.post('/login', async (req, res) => {
         message: secCheck.message,
         primary_user: secCheck.primary_student?.name,
         attempted_user: secCheck.attempted_student?.name,
-        ip_address: secCheck.ip_address
+        ip_address: secCheck.ip_address,
+        bound_ip: secCheck.bound_ip,
+        device_uuid: secCheck.device_uuid,
+        bound_device_uuid: secCheck.bound_device_uuid
       });
     }
 

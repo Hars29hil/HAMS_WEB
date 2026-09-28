@@ -2,20 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Fingerprint, BadgeIcon, ShieldAlert, X, AlertTriangle, Smartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import apiClient from '../../services/apiClient';
+import apiClient, { getOrCreateDeviceUuid } from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
 import { HamsButton } from '../../components/HamsButton';
 import './LoginPage.css';
-
-// Helper to get or create persistent device uuid
-function getOrCreateDeviceUuid(): string {
-  let uuid = localStorage.getItem('hams_device_uuid');
-  if (!uuid) {
-    uuid = 'dev_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now().toString(36);
-    localStorage.setItem('hams_device_uuid', uuid);
-  }
-  return uuid;
-}
 
 export const LoginPage: React.FC = () => {
   const [studentId, setStudentId] = useState('');
