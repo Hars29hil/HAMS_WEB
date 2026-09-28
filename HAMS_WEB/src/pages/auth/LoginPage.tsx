@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Fingerprint, BadgeIcon, ShieldAlert, X, AlertTriangle, Smartphone } from 'lucide-react';
+import { Fingerprint, BadgeIcon, ShieldAlert, AlertTriangle, Smartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient, { getOrCreateDeviceUuid } from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';

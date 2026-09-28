@@ -67,7 +67,9 @@ function resolveScheduleForDate(scheduleRow, dateObj) {
   if (!scheduleRow) return { start_time: '00:00', end_time: '00:00', late_time: null, day_schedules: [] };
 
   const now = dateObj || getCurrentIST();
-  const dayName = DAY_NAMES[now.getUTCDay()]; // e.g. 'Thu'
+  // Get day of week in IST (0=Sun, 1=Mon, ..., 6=Sat)
+  const dayIdx = now.getUTCDay !== undefined ? now.getUTCDay() : now.getDay();
+  const dayName = DAY_NAMES[dayIdx] || 'Mon';
 
   let daySchedules = null;
   if (scheduleRow.day_schedules) {
@@ -80,23 +82,29 @@ function resolveScheduleForDate(scheduleRow, dateObj) {
 
   if (Array.isArray(daySchedules) && daySchedules.length > 0) {
     const matchedSlot = daySchedules.find(slot =>
-      Array.isArray(slot.days) && slot.days.some(d => d && d.toLowerCase().slice(0, 3) === dayName.toLowerCase().slice(0, 3))
+      Array.isArray(slot.days) && slot.days.some(d => d && String(d).trim().toLowerCase().slice(0, 3) === dayName.toLowerCase().slice(0, 3))
     );
-    if (matchedSlot && matchedSlot.startTime && matchedSlot.endTime) {
+
+    const targetSlot = matchedSlot || daySchedules[0];
+    const sTime = targetSlot ? (targetSlot.startTime || targetSlot.start_time) : null;
+    const eTime = targetSlot ? (targetSlot.endTime || targetSlot.end_time) : null;
+    const lTime = targetSlot ? (targetSlot.lateTime !== undefined ? targetSlot.lateTime : targetSlot.late_time) : null;
+
+    if (sTime && eTime) {
       return {
-        start_time: normalizeHHMM(matchedSlot.startTime),
-        end_time: normalizeHHMM(matchedSlot.endTime),
-        late_time: matchedSlot.lateTime ? normalizeHHMM(matchedSlot.lateTime) : null,
+        start_time: normalizeHHMM(sTime),
+        end_time: normalizeHHMM(eTime),
+        late_time: lTime ? normalizeHHMM(lTime) : null,
         day_schedules: daySchedules,
         matched_day: dayName,
-        is_day_matched: true
+        is_day_matched: Boolean(matchedSlot)
       };
     }
   }
 
   return {
-    start_time: normalizeHHMM(scheduleRow.start_time),
-    end_time: normalizeHHMM(scheduleRow.end_time),
+    start_time: normalizeHHMM(scheduleRow.start_time || '21:00'),
+    end_time: normalizeHHMM(scheduleRow.end_time || '21:30'),
     late_time: scheduleRow.late_time ? normalizeHHMM(scheduleRow.late_time) : null,
     day_schedules: Array.isArray(daySchedules) ? daySchedules : [],
     matched_day: dayName,
@@ -365,7 +373,7 @@ router.get('/schedule', async (req, res) => {
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN day_schedules JSON DEFAULT NULL'); } catch(e) {}
     const type = (req.query.type || 'night').toLowerCase();
     const [rows] = await pool.query(
-      'SELECT start_time, end_time, late_time, linked_session_key, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config, is_for_all_students, day_schedules FROM attendance_schedules WHERE session_key = ?',
+      'SELECT start_time, end_time, late_time, linked_session_key, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config, is_for_all_students, day_schedules FROM attendance_schedules WHERE LOWER(session_key) = LOWER(?)',
       [type]
     );
     let startTimeStr = '00:00';
@@ -515,13 +523,13 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
       daySchedulesJson = typeof daySchedules === 'object' ? JSON.stringify(daySchedules) : daySchedules;
     }
 
-    await pool.query(
+    const [updateRes] = await pool.query(
       `UPDATE attendance_schedules 
        SET start_time = ?, end_time = ?, late_time = ?, linked_session_key = ?, 
            day_schedules = ?,
            auto_message = ?, auto_message_student = ?, auto_message_parent = ?, auto_message_time = ?, auto_message_audience = 'absent',
            auto_alerts_config = COALESCE(?, auto_alerts_config)
-       WHERE session_key = ?`,
+       WHERE LOWER(session_key) = LOWER(?)`,
       [
         startTime, 
         endTime, 
@@ -536,6 +544,15 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
         sessionType
       ]
     );
+
+    if (updateRes.affectedRows === 0) {
+      const defaultName = sessionType.charAt(0).toUpperCase() + sessionType.slice(1) + ' Attendance';
+      await pool.query(
+        `INSERT INTO attendance_schedules (session_key, session_name, start_time, end_time, late_time, linked_session_key, day_schedules, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [sessionType, defaultName, startTime, endTime, lateTime || null, linkedSessionKey || null, daySchedulesJson]
+      );
+    }
 
     const now = getCurrentIST();
     if (startTime !== endTime) {

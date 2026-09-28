@@ -115,6 +115,17 @@ export const StudentDashboard: React.FC = () => {
     }
   };
 
+  const formatTime12 = (t?: string) => {
+    if (!t || t === '00:00' || t === '00:00:00') return '';
+    const parts = t.slice(0, 5).split(':').map(Number);
+    if (isNaN(parts[0]) || isNaN(parts[1])) return t;
+    const h = parts[0];
+    const m = parts[1];
+    const hour = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+    const period = h >= 12 ? 'PM' : 'AM';
+    return `${String(hour).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+  };
+
   return (
     <div className="dashboard-container">
       <header className="dashboard-header glass">
@@ -179,13 +190,23 @@ export const StudentDashboard: React.FC = () => {
               <div style={{ fontWeight: 600, marginTop: '2px', marginBottom: '2px' }}>Schedules:</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                 {allSchedules.length > 0 ? (
-                  allSchedules.map((s) => (
-                    <div key={s.session_key} style={{ fontSize: '0.85rem' }}>
-                      <span style={{ fontWeight: 600 }}>{s.session_name}:</span> {s.start_time}–{s.end_time}
-                    </div>
-                  ))
+                  allSchedules.map((s) => {
+                    const startFormatted = formatTime12(s.start_time);
+                    const endFormatted = formatTime12(s.end_time);
+                    return (
+                      <div key={s.session_key} style={{ fontSize: '0.85rem' }}>
+                        <span style={{ fontWeight: 600 }}>{s.session_name}:</span>{' '}
+                        {startFormatted && endFormatted ? `${startFormatted} – ${endFormatted}` : (s.start_time && s.end_time && s.start_time !== '00:00' ? `${s.start_time} – ${s.end_time}` : 'Not Scheduled')}
+                      </div>
+                    );
+                  })
                 ) : (
-                  <div>{schedule.sessionName}: {schedule.start}–{schedule.end}</div>
+                  <div>
+                    <span style={{ fontWeight: 600 }}>{schedule.sessionName}:</span>{' '}
+                    {formatTime12(schedule.start) && formatTime12(schedule.end)
+                      ? `${formatTime12(schedule.start)} – ${formatTime12(schedule.end)}`
+                      : (schedule.start && schedule.end && schedule.start !== '00:00' ? `${schedule.start} – ${schedule.end}` : 'Not Scheduled')}
+                  </div>
                 )}
               </div>
             </div>
