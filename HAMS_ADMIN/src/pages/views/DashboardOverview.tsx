@@ -555,7 +555,7 @@ export const DashboardOverview: React.FC = () => {
       {/* Main Grid: Chart & Floor Status */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '2fr 1fr',
+        gridTemplateColumns: '1fr 1.35fr',
         gap: '24px',
       }}>
         {/* Attendance Trend Chart */}
@@ -599,9 +599,9 @@ export const DashboardOverview: React.FC = () => {
           </div>
         </HamsCard>
 
-        {/* Live Floor Status */}
+        {/* Live Floor Status (2 Columns: Ground-4 and 5-9) */}
         <HamsCard padding="24px">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <div>
               <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
                 Live Floor Status
@@ -613,53 +613,133 @@ export const DashboardOverview: React.FC = () => {
             <Radio size={20} color="#4f46e5" />
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '300px', overflowY: 'auto' }}>
-            {(stats?.floor_status || []).length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
-                No floor data found
+          {((stats?.floor_status || []).length === 0) ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+              No floor data found
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: '14px',
+            }}>
+              {/* Column 1: Ground Floor to Floor 4 (5 Floors) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#4f46e5',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  marginBottom: '2px'
+                }}>
+                  Ground – Floor 4
+                </div>
+                {(stats?.floor_status || []).filter((f: any) => Number(f.floor_id) <= 4).map((floor: any, i: number) => {
+                  const presentCount = floor.present_students ?? floor.present ?? 0;
+                  const totalCount = floor.total_students ?? floor.total ?? 0;
+                  const perc = totalCount > 0 ? (presentCount / totalCount) * 100 : (floor.percentage || 0);
+                  return (
+                    <div
+                      key={floor.floor_id ?? i}
+                      style={{
+                        padding: '9px 12px',
+                        backgroundColor: '#f8fafc',
+                        borderRadius: '10px',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a' }}>
+                          {floor.floor_name || (Number(floor.floor_id) === 0 ? 'Ground Floor' : `Floor ${floor.floor_id}`)}
+                        </span>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          color: presentCount > 0 ? '#10b981' : '#64748b',
+                        }}>
+                          {presentCount}/{totalCount} <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>({perc.toFixed(0)}%)</span>
+                        </span>
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{ width: '100%', height: '5px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(0, perc))}%`,
+                            height: '100%',
+                            backgroundColor: perc >= 80 ? '#10b981' : perc >= 40 ? '#3b82f6' : perc > 0 ? '#f59e0b' : '#cbd5e1',
+                            borderRadius: '3px',
+                            transition: 'width 0.4s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ) : (
-              (stats?.floor_status || []).map((floor: any, i: number) => {
-                const presentCount = floor.present_students ?? floor.present ?? 0;
-                const totalCount = floor.total_students ?? floor.total ?? 0;
-                const perc = totalCount > 0 ? (presentCount / totalCount) * 100 : (floor.percentage || 0);
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      padding: '12px 14px',
-                      backgroundColor: '#f8fafc',
-                      borderRadius: '10px',
-                      border: '1px solid #e2e8f0',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a' }}>{floor.floor_name || `Floor ${floor.floor_id}`}</span>
-                      <span style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        color: presentCount > 0 ? '#10b981' : '#64748b',
-                      }}>
-                        {presentCount} / {totalCount} ({perc.toFixed(0)}%)
-                      </span>
+
+              {/* Column 2: Floor 5 to Floor 9 (5 Floors) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#4f46e5',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  marginBottom: '2px'
+                }}>
+                  Floor 5 – Floor 9
+                </div>
+                {(stats?.floor_status || []).filter((f: any) => Number(f.floor_id) >= 5).map((floor: any, i: number) => {
+                  const presentCount = floor.present_students ?? floor.present ?? 0;
+                  const totalCount = floor.total_students ?? floor.total ?? 0;
+                  const perc = totalCount > 0 ? (presentCount / totalCount) * 100 : (floor.percentage || 0);
+                  return (
+                    <div
+                      key={floor.floor_id ?? i}
+                      style={{
+                        padding: '9px 12px',
+                        backgroundColor: '#f8fafc',
+                        borderRadius: '10px',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a' }}>
+                          {floor.floor_name || `Floor ${floor.floor_id}`}
+                        </span>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          color: presentCount > 0 ? '#10b981' : '#64748b',
+                        }}>
+                          {presentCount}/{totalCount} <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>({perc.toFixed(0)}%)</span>
+                        </span>
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{ width: '100%', height: '5px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(0, perc))}%`,
+                            height: '100%',
+                            backgroundColor: perc >= 80 ? '#10b981' : perc >= 40 ? '#3b82f6' : perc > 0 ? '#f59e0b' : '#cbd5e1',
+                            borderRadius: '3px',
+                            transition: 'width 0.4s ease',
+                          }}
+                        />
+                      </div>
                     </div>
-                    {/* Progress bar */}
-                    <div style={{ width: '100%', height: '6px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          width: `${perc}%`,
-                          height: '100%',
-                          backgroundColor: perc > 75 ? '#10b981' : perc > 40 ? '#3b82f6' : '#f59e0b',
-                          borderRadius: '3px',
-                          transition: 'width 0.4s ease',
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </HamsCard>
       </div>
 

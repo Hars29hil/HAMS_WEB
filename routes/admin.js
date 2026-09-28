@@ -250,22 +250,6 @@ router.get('/dashboard', async (req, res) => {
     for (const row of floorPresentRows) {
       floorPresentMap[row.floor_id] = row.present_count;
     }
-    const floorPresentParams = [];
-    if (activeFilterKey !== 'all') {
-      floorPresentQuery += ' AND s.session_type = ?';
-      floorPresentParams.push(activeFilterKey);
-    }
-    if (leaderFloors && leaderFloors.length > 0) {
-      floorPresentQuery += ' AND st.floor_id IN (?)';
-      floorPresentParams.push(leaderFloors);
-    }
-    floorPresentQuery += ' GROUP BY st.floor_id';
-
-    const [floorPresentRows] = await pool.query(floorPresentQuery, floorPresentParams);
-    const floorPresentMap = {};
-    for (const row of floorPresentRows) {
-      floorPresentMap[row.floor_id] = row.present_count;
-    }
 
     // Floor total active students
     let floorTotalsQuery = 'SELECT floor_id, COUNT(*) AS floor_total FROM students WHERE is_active = TRUE';
