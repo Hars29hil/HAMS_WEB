@@ -27,16 +27,21 @@ export const AdminLayout: React.FC = () => {
 
   useEffect(() => {
     fetchSessions();
-  }, []);
+  }, [location.pathname]);
 
   const fetchSessions = async () => {
     try {
       const res = await apiClient.get('/admin/sessions');
-      if (res.data.success) {
+      if (res.data.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
         setSessions(res.data.data);
+      } else {
+        const altRes = await apiClient.get('/attendance/schedule-data');
+        if (Array.isArray(altRes.data) && altRes.data.length > 0) {
+          setSessions(altRes.data);
+        }
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load sidebar sessions:', e);
     }
   };
 

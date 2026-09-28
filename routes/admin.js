@@ -786,7 +786,11 @@ router.post('/esp32/unassign', async (req, res) => {
 // ------------------------------------------------------------
 router.get('/sessions', async (req, res) => {
   try {
-    let query = 'SELECT * FROM attendance_schedules WHERE is_active = TRUE';
+    try {
+      await pool.query('ALTER TABLE attendance_schedules ADD COLUMN is_active BOOLEAN DEFAULT TRUE');
+    } catch(e) {}
+
+    let query = 'SELECT * FROM attendance_schedules WHERE (is_active = TRUE OR is_active = 1 OR is_active IS NULL)';
     const params = [];
 
     if (req.leader && Array.isArray(req.leader.assigned_sessions) && req.leader.assigned_sessions.length > 0 && !req.leader.assigned_sessions.includes('all')) {
@@ -795,11 +799,29 @@ router.get('/sessions', async (req, res) => {
     }
 
     query += ' ORDER BY start_time ASC';
-    const [rows] = await pool.query(query, params);
-    return res.json({ success: true, data: rows });
+    let [rows] = await pool.query(query, params);
+
+    if (rows.length === 0 && (!req.leader || !req.leader.assigned_sessions || req.leader.assigned_sessions.length === 0 || req.leader.assigned_sessions.includes('all'))) {
+      try {
+        await pool.query(`
+          INSERT INTO attendance_schedules (session_key, session_name, icon_name, start_time, end_time, is_active, is_for_all_students)
+          VALUES 
+          ('night', 'Night Attendance', 'moon', '21:00', '21:30', 1, 1),
+          ('aarti', 'Aarti Attendance', 'sun', '06:00', '06:30', 1, 1),
+          ('weekly_assembly', 'Weekly Assembly', 'users', '08:00', '09:00', 1, 1)
+          ON DUPLICATE KEY UPDATE is_active = 1
+        `);
+        const [seededRows] = await pool.query(query, params);
+        rows = seededRows;
+      } catch (seedErr) {
+        console.warn('Could not seed default attendance schedules:', seedErr.message);
+      }
+    }
+
+    return res.json({ success: true, data: rows || [] });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('GET /api/admin/sessions error:', err);
+    return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 });
 
