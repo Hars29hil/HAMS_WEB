@@ -436,13 +436,13 @@ export const LeavesManagementView: React.FC = () => {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '13px' }}>
-                <th style={{ padding: '12px 14px' }}>Bank Code</th>
-                <th style={{ padding: '12px 14px' }}>Student Name</th>
-                <th style={{ padding: '12px 14px' }}>Floor / Room</th>
-                <th style={{ padding: '12px 14px' }}>Leave Duration</th>
-                <th style={{ padding: '12px 14px' }}>Leave Reason</th>
-                <th style={{ padding: '12px 14px' }}>Contact</th>
-                <th style={{ padding: '12px 14px', textAlign: 'right' }}>Status</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Bank Code</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap', minWidth: '180px' }}>Student Name</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Floor / Room</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Leave Duration</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap', width: '120px', maxWidth: '140px' }}>Leave Reason</th>
+                <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Contact</th>
+                <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -450,13 +450,13 @@ export const LeavesManagementView: React.FC = () => {
                 const activeNow = isCurrentlyActive(l.start_time, l.end_time);
                 return (
                   <tr key={l.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#4f46e5' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#4f46e5', whiteSpace: 'nowrap' }}>
                       {l.bank_code}
                     </td>
-                    <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {l.student_name || '—'}
                     </td>
-                    <td style={{ padding: '12px 14px', color: '#475569', fontSize: '13px' }}>
+                    <td style={{ padding: '12px 14px', color: '#475569', fontSize: '13px', whiteSpace: 'nowrap' }}>
                       {l.floor_id !== null && l.floor_id !== undefined ? `Floor ${l.floor_id}` : ''} {l.room_number ? `(Rm ${l.room_number})` : ''}
                     </td>
                     <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
@@ -469,15 +469,16 @@ export const LeavesManagementView: React.FC = () => {
                         </span>
                       </div>
                     </td>
-                    <td style={{ padding: '12px 14px', maxWidth: '240px' }}>
+                    <td style={{ padding: '12px 14px', width: '120px', maxWidth: '140px' }}>
                       <ExpandableReasonTooltip
                         text={l.reason || 'Approved Leave'}
-                        maxLength={35}
+                        maxLength={16}
+                        containerMaxWidth="130px"
                         badgeStyle={true}
                         color="#334155"
                       />
                     </td>
-                    <td style={{ padding: '12px 14px', fontSize: '13px' }}>
+                    <td style={{ padding: '12px 14px', fontSize: '13px', whiteSpace: 'nowrap' }}>
                       {l.phone ? (
                         <a 
                           href={`tel:${l.phone}`}
@@ -489,7 +490,7 @@ export const LeavesManagementView: React.FC = () => {
                         '—'
                       )}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {activeNow ? (
                         <span style={{
                           padding: '4px 12px',

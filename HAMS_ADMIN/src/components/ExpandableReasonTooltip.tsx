@@ -8,6 +8,7 @@ interface ExpandableReasonTooltipProps {
   badgeStyle?: boolean;
   color?: string;
   prefixBadge?: React.ReactNode;
+  containerMaxWidth?: string;
 }
 
 export const ExpandableReasonTooltip: React.FC<ExpandableReasonTooltipProps> = ({
@@ -16,7 +17,8 @@ export const ExpandableReasonTooltip: React.FC<ExpandableReasonTooltipProps> = (
   maxLength = 45,
   badgeStyle = false,
   color,
-  prefixBadge
+  prefixBadge,
+  containerMaxWidth
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -61,7 +63,7 @@ export const ExpandableReasonTooltip: React.FC<ExpandableReasonTooltipProps> = (
           gap: '5px',
           cursor: isLong ? 'help' : 'default',
           position: 'relative',
-          maxWidth: '240px'
+          maxWidth: containerMaxWidth || '240px'
         }}
       >
         {prefixBadge}
@@ -73,7 +75,7 @@ export const ExpandableReasonTooltip: React.FC<ExpandableReasonTooltipProps> = (
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            maxWidth: '220px',
+            maxWidth: containerMaxWidth || '220px',
             display: 'inline-block',
             ...(badgeStyle ? {
               padding: '3px 8px',
