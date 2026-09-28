@@ -257,19 +257,30 @@ router.get('/', async (req, res) => {
 // ------------------------------------------------------------
 router.get('/details/:code', async (req, res) => {
   try {
-    const studentCode = req.params.code;
-    const isNum = !isNaN(studentCode);
-    const numericId = isNum ? parseInt(studentCode, 10) : 0;
+    const studentCode = String(req.params.code).trim();
 
-    const [rows] = await pool.query(`
+    // 1. Try matching student_code first (since student_code is the canonical student ID e.g. '0876')
+    let [rows] = await pool.query(`
       SELECT s.*, f.floor_name 
       FROM students s
       LEFT JOIN floors f ON s.floor_id = f.floor_id
       WHERE s.student_code = ? 
          OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM ?)
-         OR s.id = ?
       LIMIT 1
-    `, [studentCode, studentCode, numericId]);
+    `, [studentCode, studentCode]);
+
+    // 2. If not found by student_code, try matching by primary key id
+    if (rows.length === 0 && !isNaN(studentCode)) {
+      const numericId = parseInt(studentCode, 10);
+      const [idRows] = await pool.query(`
+        SELECT s.*, f.floor_name 
+        FROM students s
+        LEFT JOIN floors f ON s.floor_id = f.floor_id
+        WHERE s.id = ?
+        LIMIT 1
+      `, [numericId]);
+      rows = idRows;
+    }
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Student not found in database' });

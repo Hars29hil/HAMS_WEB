@@ -20,7 +20,10 @@ import {
   MessageSquare,
   Send,
   Users,
-  Phone
+  Phone,
+  Plus,
+  Calendar,
+  Sparkles
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
@@ -82,6 +85,25 @@ const DEFAULT_ALERTS_CONFIG: AutoAlertsConfig = {
   }
 };
 
+interface DayScheduleSlot {
+  id: string;
+  days: string[];
+  startTime: string;
+  endTime: string;
+  lateTime?: string | null;
+}
+
+const ALL_WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_FULL_NAMES: Record<string, string> = {
+  Sun: 'Sunday',
+  Mon: 'Monday',
+  Tue: 'Tuesday',
+  Wed: 'Wednesday',
+  Thu: 'Thursday',
+  Fri: 'Friday',
+  Sat: 'Saturday'
+};
+
 export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDeleted?: () => void }> = ({
   sessionKey,
   onSessionDeleted,
@@ -93,6 +115,71 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
   const [lateTime, setLateTime] = useState<string | null>(null);
   const [linkedSessionKey, setLinkedSessionKey] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<any[]>([]);
+
+  // Day-wise Schedule State
+  const [daySchedules, setDaySchedules] = useState<DayScheduleSlot[]>([
+    {
+      id: 'slot_default',
+      days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      startTime: '21:00',
+      endTime: '21:30',
+      lateTime: null
+    }
+  ]);
+
+  const getAssignedDays = (excludeSlotId?: string) => {
+    const set = new Set<string>();
+    daySchedules.forEach(slot => {
+      if (slot.id !== excludeSlotId) {
+        slot.days.forEach(d => set.add(d));
+      }
+    });
+    return set;
+  };
+
+  const handleAddDaySchedule = () => {
+    const assigned = getAssignedDays();
+    const unassignedDays = ALL_WEEK_DAYS.filter(d => !assigned.has(d));
+    
+    if (unassignedDays.length === 0) {
+      alert('All 7 days already have schedule rules.');
+      return;
+    }
+
+    const newSlot: DayScheduleSlot = {
+      id: 'slot_' + Date.now(),
+      days: unassignedDays,
+      startTime: startTime || '21:00',
+      endTime: endTime || '21:30',
+      lateTime: lateTime || null
+    };
+
+    setDaySchedules(prev => [...prev, newSlot]);
+  };
+
+  const handleRemoveSlot = (slotId: string) => {
+    if (daySchedules.length <= 1) {
+      alert('At least one schedule rule must exist.');
+      return;
+    }
+    setDaySchedules(prev => prev.filter(s => s.id !== slotId));
+  };
+
+  const handleToggleDayInSlot = (slotId: string, day: string) => {
+    setDaySchedules(prev => prev.map(slot => {
+      if (slot.id !== slotId) return slot;
+      const exists = slot.days.includes(day);
+      const newDays = exists ? slot.days.filter(d => d !== day) : [...slot.days, day];
+      return { ...slot, days: newDays };
+    }));
+  };
+
+  const handleSlotTimeChange = (slotId: string, field: 'startTime' | 'endTime' | 'lateTime', value: any) => {
+    setDaySchedules(prev => prev.map(slot => {
+      if (slot.id !== slotId) return slot;
+      return { ...slot, [field]: value };
+    }));
+  };
 
   // Multi-Category WhatsApp Alerts Configuration
   const [alertsConfig, setAlertsConfig] = useState<AutoAlertsConfig>(DEFAULT_ALERTS_CONFIG);
@@ -181,6 +268,20 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
         setAutoMessageTime(d.auto_message_time ? d.auto_message_time.slice(0, 5) : '');
         if (d.is_for_all_students !== undefined) {
           setIsForAllStudents(Boolean(d.is_for_all_students));
+        }
+
+        if (d.day_schedules && Array.isArray(d.day_schedules) && d.day_schedules.length > 0) {
+          setDaySchedules(d.day_schedules);
+        } else {
+          setDaySchedules([
+            {
+              id: 'slot_1',
+              days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+              startTime: (d.start_time || '21:00').slice(0, 5),
+              endTime: (d.end_time || '21:30').slice(0, 5),
+              lateTime: d.late_time ? d.late_time.slice(0, 5) : null
+            }
+          ]);
         }
 
         if (d.auto_alerts_config) {
@@ -282,17 +383,35 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
   };
 
   const saveSchedule = async () => {
+    // Validate day schedules
+    for (let i = 0; i < daySchedules.length; i++) {
+      const slot = daySchedules[i];
+      if (!slot.days || slot.days.length === 0) {
+        alert(`Rule #${i + 1} has no days selected. Please select at least one day or remove the rule.`);
+        return;
+      }
+      if (!slot.startTime || !slot.endTime) {
+        alert(`Rule #${i + 1} is missing Start Time or End Time.`);
+        return;
+      }
+    }
+
+    const primarySlot = daySchedules[0];
+    const sTime = primarySlot ? primarySlot.startTime : startTime;
+    const eTime = primarySlot ? primarySlot.endTime : endTime;
+    const lTime = primarySlot ? primarySlot.lateTime : lateTime;
+
     // Validate that autoMessageTime is after endTime
     if (autoMessageTime && autoMessageTime.trim()) {
-      const [eh, em] = endTime.split(':').map(Number);
+      const [eh, em] = eTime.split(':').map(Number);
       const [mh, mm] = autoMessageTime.split(':').map(Number);
-      const [sh, sm] = startTime.split(':').map(Number);
+      const [sh, sm] = sTime.split(':').map(Number);
       const eMins = eh * 60 + em;
       const mMins = mh * 60 + mm;
       const sMins = sh * 60 + sm;
 
       if (sMins <= eMins && mMins <= eMins) {
-        alert(`Automated WhatsApp message time (${autoMessageTime}) must be set AFTER attendance End Time (${endTime})!`);
+        alert(`Automated WhatsApp message time (${autoMessageTime}) must be set AFTER attendance End Time (${eTime})!`);
         return;
       }
     }
@@ -301,9 +420,10 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     try {
       const res = await apiClient.put('/attendance/schedule', {
         type: sessionKey,
-        startTime: startTime,
-        endTime: endTime,
-        lateTime: lateTime,
+        startTime: sTime,
+        endTime: eTime,
+        lateTime: lTime,
+        daySchedules: daySchedules,
         linkedSessionKey: linkedSessionKey,
         autoMessage: alertsConfig.absent.student_message,
         autoMessageStudent: alertsConfig.absent.student_message,
@@ -311,7 +431,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
         autoMessageTime: autoMessageTime,
         autoAlertsConfig: alertsConfig
       });
-      alert(res.data.message || 'Schedule and WhatsApp alert settings saved successfully!');
+      alert(res.data.message || 'Weekly day schedule and WhatsApp alert settings saved successfully!');
       fetchSchedule();
     } catch (e: any) {
       alert(e.response?.data?.message || 'Failed to update schedule');
@@ -677,36 +797,177 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
           </div>
 
           <div className="time-window-card">
-            <div className="window-card-header">
-              <div className="header-icon-pill">
-                <Clock size={18} />
-              </div>
-              <h3>Global Time Window</h3>
-            </div>
-
-            <div className="time-pickers-container">
-              <div className="time-input-field">
-                <label>Start Time</label>
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={e => setStartTime(e.target.value)}
-                />
-              </div>
-
-              <ArrowRight size={22} className="time-arrow" />
-
-              <div className="time-input-field">
-                <label>End Time</label>
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={e => setEndTime(e.target.value)}
-                />
+            <div className="window-card-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="header-icon-pill">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>Weekly Day-Wise Time Schedule</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                    Configure specific attendance timings for different days of the week (e.g. Thursday 10:45–11:15, other days 10:30–11:05).
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="advanced-settings-header">Advanced Settings</div>
+            {/* List of Day Rule Slots */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', margin: '16px 0' }}>
+              {daySchedules.map((slot, index) => {
+                const otherAssignedDays = getAssignedDays(slot.id);
+                return (
+                  <div 
+                    key={slot.id} 
+                    style={{
+                      backgroundColor: '#f8fafc',
+                      border: '1.5px solid #e2e8f0',
+                      borderRadius: '16px',
+                      padding: '18px 20px',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+                    }}
+                  >
+                    {/* Rule Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{
+                          backgroundColor: '#4f46e5',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          padding: '4px 10px',
+                          borderRadius: '8px'
+                        }}>
+                          Rule #{index + 1}
+                        </span>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                          {slot.days.length} day{slot.days.length !== 1 ? 's' : ''} assigned ({slot.days.join(', ') || 'None'})
+                        </span>
+                      </div>
+                      {daySchedules.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSlot(slot.id)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#ef4444',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '12px',
+                            fontWeight: 700
+                          }}
+                        >
+                          <Trash2 size={14} /> Remove Rule
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Days Selection row */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                        Active Days for this Time:
+                      </label>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {ALL_WEEK_DAYS.map(day => {
+                          const isSelected = slot.days.includes(day);
+                          const isAssignedElsewhere = otherAssignedDays.has(day);
+
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              disabled={isAssignedElsewhere}
+                              onClick={() => handleToggleDayInSlot(slot.id, day)}
+                              title={isAssignedElsewhere ? `Assigned to another rule` : `Click to toggle ${DAY_FULL_NAMES[day]}`}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '10px',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                cursor: isAssignedElsewhere ? 'not-allowed' : 'pointer',
+                                border: isSelected ? '1.5px solid #4f46e5' : '1.5px solid #cbd5e1',
+                                backgroundColor: isSelected ? '#4f46e5' : (isAssignedElsewhere ? '#f1f5f9' : '#ffffff'),
+                                color: isSelected ? '#ffffff' : (isAssignedElsewhere ? '#94a3b8' : '#334155'),
+                                opacity: isAssignedElsewhere ? 0.5 : 1,
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Time Pickers for this slot */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', alignItems: 'flex-end' }}>
+                      <div className="time-input-field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>START TIME</label>
+                        <input
+                          type="time"
+                          value={slot.startTime}
+                          onChange={e => handleSlotTimeChange(slot.id, 'startTime', e.target.value)}
+                          style={{ width: '100%', height: '42px', borderRadius: '8px' }}
+                        />
+                      </div>
+
+                      <div className="time-input-field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>END TIME</label>
+                        <input
+                          type="time"
+                          value={slot.endTime}
+                          onChange={e => handleSlotTimeChange(slot.id, 'endTime', e.target.value)}
+                          style={{ width: '100%', height: '42px', borderRadius: '8px' }}
+                        />
+                      </div>
+
+                      <div className="time-input-field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>LATE CUTOFF (OPTIONAL)</label>
+                        <input
+                          type="time"
+                          value={slot.lateTime || ''}
+                          onChange={e => handleSlotTimeChange(slot.id, 'lateTime', e.target.value || null)}
+                          style={{ width: '100%', height: '42px', borderRadius: '8px' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Set New Time for remaining days button */}
+              {ALL_WEEK_DAYS.some(d => !getAssignedDays().has(d)) ? (
+                <button
+                  type="button"
+                  onClick={handleAddDaySchedule}
+                  style={{
+                    padding: '12px 20px',
+                    border: '2px dashed #818cf8',
+                    borderRadius: '14px',
+                    backgroundColor: '#eff6ff',
+                    color: '#4338ca',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <Plus size={16} /> Set New Time for Remaining Days ({ALL_WEEK_DAYS.filter(d => !getAssignedDays().has(d)).join(', ')})
+                </button>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: 700, textAlign: 'center', padding: '6px' }}>
+                  ✓ All 7 days of the week have assigned timing rules.
+                </div>
+              )}
+            </div>
+
+            <div className="advanced-settings-header" style={{ marginTop: '20px' }}>Linked Attendance Settings</div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
               <div className="time-input-field">

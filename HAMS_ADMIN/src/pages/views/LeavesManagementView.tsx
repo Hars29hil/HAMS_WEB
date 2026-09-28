@@ -11,7 +11,8 @@ import {
   Users, 
   AlertCircle,
   Sparkles,
-  Info
+  Info,
+  X
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
@@ -23,6 +24,7 @@ export const LeavesManagementView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -442,7 +444,31 @@ export const LeavesManagementView: React.FC = () => {
                 <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Leave Duration</th>
                 <th style={{ padding: '12px 14px', whiteSpace: 'nowrap', width: '120px', maxWidth: '140px' }}>Leave Reason</th>
                 <th style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>Contact</th>
-                <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Status</th>
+                <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    Status
+                    <button
+                      type="button"
+                      onClick={() => setInfoModalOpen(true)}
+                      title="What do Active Today and Approved mean? Click to view guide"
+                      style={{
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '50%',
+                        width: '20px',
+                        height: '20px',
+                        color: '#2563eb',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0
+                      }}
+                    >
+                      <Info size={12} />
+                    </button>
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -502,8 +528,12 @@ export const LeavesManagementView: React.FC = () => {
                           fontWeight: 800,
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px'
-                        }}>
+                          gap: '6px',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => setInfoModalOpen(true)}
+                        title="Click to view status explanation"
+                        >
                           <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
                           Active Today
                         </span>
@@ -515,8 +545,12 @@ export const LeavesManagementView: React.FC = () => {
                           color: '#6d28d9',
                           border: '1px solid #ddd6fe',
                           fontSize: '12px',
-                          fontWeight: 700
-                        }}>
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => setInfoModalOpen(true)}
+                        title="Click to view status explanation"
+                        >
                           Approved
                         </span>
                       )}
@@ -536,6 +570,92 @@ export const LeavesManagementView: React.FC = () => {
           </table>
         </div>
       </HamsCard>
+
+      {/* LEAVE STATUS GUIDE / INFO MODAL */}
+      {infoModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '20px',
+            padding: '28px',
+            maxWidth: '500px',
+            width: '100%',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            border: '1px solid #e2e8f0'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: '#eff6ff', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Info size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>Leave Status Guide</h3>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>What "Active Today" & "Approved" Mean</span>
+                </div>
+              </div>
+              <button onClick={() => setInfoModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Active Today */}
+              <div style={{ padding: '16px', borderRadius: '14px', backgroundColor: '#ecfdf5', border: '1.5px solid #a7f3d0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '12px', backgroundColor: '#10b981', color: '#ffffff', fontSize: '12px', fontWeight: 800 }}>
+                    ● Active Today
+                  </span>
+                  <strong style={{ fontSize: '14px', color: '#065f46' }}>Currently on Leave (Excused)</strong>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: '#047857', lineHeight: '1.5' }}>
+                  The student is away on approved leave today. They are <strong>automatically excused</strong> from today's attendance sessions and will <strong>not</strong> be marked as absent.
+                </p>
+              </div>
+
+              {/* Approved */}
+              <div style={{ padding: '16px', borderRadius: '14px', backgroundColor: '#f5f3ff', border: '1.5px solid #ddd6fe' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '12px', backgroundColor: '#8b5cf6', color: '#ffffff', fontSize: '12px', fontWeight: 800 }}>
+                    Approved
+                  </span>
+                  <strong style={{ fontSize: '14px', color: '#5b21b6' }}>Past or Scheduled Leave Record</strong>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: '#6d28d9', lineHeight: '1.5' }}>
+                  The student has a verified leave recorded in the system for past completed dates or upcoming future dates, but the leave is <strong>not active for today</strong>.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setInfoModalOpen(false)}
+              style={{
+                width: '100%',
+                marginTop: '20px',
+                padding: '12px',
+                backgroundColor: '#4f46e5',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '14px',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              Got it, Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -60,12 +60,57 @@ function getSessionDateTimes(sessionDateStr, startTimeStr, endTimeStr) {
   return { startDt, endDt };
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Resolves start_time, end_time, late_time for a given date/day of week
+function resolveScheduleForDate(scheduleRow, dateObj) {
+  if (!scheduleRow) return { start_time: '00:00', end_time: '00:00', late_time: null, day_schedules: [] };
+
+  const now = dateObj || getCurrentIST();
+  const dayName = DAY_NAMES[now.getUTCDay()]; // e.g. 'Thu'
+
+  let daySchedules = null;
+  if (scheduleRow.day_schedules) {
+    try {
+      daySchedules = typeof scheduleRow.day_schedules === 'string'
+        ? JSON.parse(scheduleRow.day_schedules)
+        : scheduleRow.day_schedules;
+    } catch(e) {}
+  }
+
+  if (Array.isArray(daySchedules) && daySchedules.length > 0) {
+    const matchedSlot = daySchedules.find(slot =>
+      Array.isArray(slot.days) && slot.days.some(d => d && d.toLowerCase().slice(0, 3) === dayName.toLowerCase().slice(0, 3))
+    );
+    if (matchedSlot && matchedSlot.startTime && matchedSlot.endTime) {
+      return {
+        start_time: normalizeHHMM(matchedSlot.startTime),
+        end_time: normalizeHHMM(matchedSlot.endTime),
+        late_time: matchedSlot.lateTime ? normalizeHHMM(matchedSlot.lateTime) : null,
+        day_schedules: daySchedules,
+        matched_day: dayName,
+        is_day_matched: true
+      };
+    }
+  }
+
+  return {
+    start_time: normalizeHHMM(scheduleRow.start_time),
+    end_time: normalizeHHMM(scheduleRow.end_time),
+    late_time: scheduleRow.late_time ? normalizeHHMM(scheduleRow.late_time) : null,
+    day_schedules: Array.isArray(daySchedules) ? daySchedules : [],
+    matched_day: dayName,
+    is_day_matched: false
+  };
+}
+
 // ------------------------------------------------------------
 // GET /api/attendance/schedule-data
 // Returns dynamic session schedules
 // ------------------------------------------------------------
 router.get('/schedule-data', async (req, res) => {
   try {
+    try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN day_schedules JSON DEFAULT NULL'); } catch(e) {}
     const includeInactive = req.query.all === 'true' || req.query.include_inactive === 'true';
     let query = 'SELECT * FROM attendance_schedules';
     if (!includeInactive) {
@@ -74,25 +119,30 @@ router.get('/schedule-data', async (req, res) => {
     query += ' ORDER BY start_time ASC';
 
     const [rows] = await pool.query(query);
+    const now = getCurrentIST();
 
-    const formattedSessions = rows.map(r => ({
-      id: r.id,
-      session_key: r.session_key,
-      session_name: r.session_name,
-      start_time: r.start_time,
-      end_time: r.end_time,
-      late_time: r.late_time || null,
-      is_for_all_students: r.is_for_all_students !== undefined ? Boolean(r.is_for_all_students) : true,
-      icon_name: r.icon_name || 'moon',
-      is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
-      linked_session_key: r.linked_session_key || null,
-      auto_message: r.auto_message || null,
-      auto_message_time: r.auto_message_time || null,
-      auto_message_audience: r.auto_message_audience || 'all',
-      auto_message_student: r.auto_message_student || null,
-      auto_message_parent: r.auto_message_parent || null,
-      created_at: r.created_at
-    }));
+    const formattedSessions = rows.map(r => {
+      const resolved = resolveScheduleForDate(r, now);
+      return {
+        id: r.id,
+        session_key: r.session_key,
+        session_name: r.session_name,
+        start_time: resolved.start_time,
+        end_time: resolved.end_time,
+        late_time: resolved.late_time,
+        day_schedules: resolved.day_schedules,
+        is_for_all_students: r.is_for_all_students !== undefined ? Boolean(r.is_for_all_students) : true,
+        icon_name: r.icon_name || 'moon',
+        is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
+        linked_session_key: r.linked_session_key || null,
+        auto_message: r.auto_message || null,
+        auto_message_time: r.auto_message_time || null,
+        auto_message_audience: r.auto_message_audience || 'all',
+        auto_message_student: r.auto_message_student || null,
+        auto_message_parent: r.auto_message_parent || null,
+        created_at: r.created_at
+      };
+    });
 
     return res.json(formattedSessions);
   } catch (err) {
@@ -126,17 +176,25 @@ router.get('/my-status', verifyStudent, async (req, res) => {
 
     // Fetch all schedules from dynamic table
     const [scheduleRows] = await pool.query(
-      'SELECT session_key, session_name, icon_name, start_time, end_time, is_for_all_students FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC'
+      'SELECT session_key, session_name, icon_name, start_time, end_time, late_time, day_schedules, is_for_all_students FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC'
     );
     
-    const allSchedules = scheduleRows.map(r => ({
-      session_key: r.session_key,
-      session_name: r.session_name || r.session_key,
-      icon_name: r.icon_name || 'moon',
-      start_time: normalizeHHMM(r.start_time),
-      end_time: normalizeHHMM(r.end_time),
-      is_for_all_students: r.is_for_all_students
-    }));
+    const now = getCurrentIST();
+    const sessionDate = now.toISOString().slice(0, 10);
+
+    const allSchedules = scheduleRows.map(r => {
+      const resolved = resolveScheduleForDate(r, now);
+      return {
+        session_key: r.session_key,
+        session_name: r.session_name || r.session_key,
+        icon_name: r.icon_name || 'moon',
+        start_time: resolved.start_time,
+        end_time: resolved.end_time,
+        late_time: resolved.late_time,
+        day_schedules: resolved.day_schedules,
+        is_for_all_students: r.is_for_all_students
+      };
+    });
 
     const schedules = {};
     for (const row of allSchedules) {
@@ -148,9 +206,6 @@ router.get('/my-status', verifyStudent, async (req, res) => {
         end_time: row.end_time
       };
     }
-    
-    const now = getCurrentIST();
-    const sessionDate = now.toISOString().slice(0, 10);
 
     let activeSession = null;
     for (const sched of allSchedules) {
@@ -307,9 +362,10 @@ router.get('/my-status', verifyStudent, async (req, res) => {
 // ------------------------------------------------------------
 router.get('/schedule', async (req, res) => {
   try {
+    try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN day_schedules JSON DEFAULT NULL'); } catch(e) {}
     const type = (req.query.type || 'night').toLowerCase();
     const [rows] = await pool.query(
-      'SELECT start_time, end_time, late_time, linked_session_key, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config, is_for_all_students FROM attendance_schedules WHERE session_key = ?',
+      'SELECT start_time, end_time, late_time, linked_session_key, auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config, is_for_all_students, day_schedules FROM attendance_schedules WHERE session_key = ?',
       [type]
     );
     let startTimeStr = '00:00';
@@ -322,6 +378,7 @@ router.get('/schedule', async (req, res) => {
     let autoMessageTime = null;
     let autoMessageAudience = 'all';
     let autoAlertsConfig = null;
+    let daySchedules = [];
 
     if (rows.length > 0) {
       startTimeStr = rows[0].start_time;
@@ -333,6 +390,13 @@ router.get('/schedule', async (req, res) => {
       autoMessageParent = rows[0].auto_message_parent;
       autoMessageTime = rows[0].auto_message_time;
       autoMessageAudience = rows[0].auto_message_audience;
+      if (rows[0].day_schedules) {
+        try {
+          daySchedules = typeof rows[0].day_schedules === 'string' ? JSON.parse(rows[0].day_schedules) : rows[0].day_schedules;
+        } catch(e) {
+          daySchedules = [];
+        }
+      }
       if (rows[0].auto_alerts_config) {
         try {
           autoAlertsConfig = typeof rows[0].auto_alerts_config === 'string' ? JSON.parse(rows[0].auto_alerts_config) : rows[0].auto_alerts_config;
@@ -378,6 +442,7 @@ router.get('/schedule', async (req, res) => {
         end_time: endTimeStr,
         late_time: lateTimeStr,
         linked_session_key: linkedSessionKey,
+        day_schedules: daySchedules || [],
         auto_message: autoMessage,
         auto_message_student: autoMessageStudent,
         auto_message_parent: autoMessageParent,
@@ -397,12 +462,14 @@ router.get('/schedule', async (req, res) => {
 // ------------------------------------------------------------
 router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
   try {
+    try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN day_schedules JSON DEFAULT NULL'); } catch(e) {}
     const { 
       startTime, 
       endTime, 
       type, 
       lateTime, 
       linkedSessionKey, 
+      daySchedules,
       autoMessage, 
       autoMessageStudent, 
       autoMessageParent, 
@@ -443,9 +510,15 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
       alertsConfigJson = typeof req.body.autoAlertsConfig === 'object' ? JSON.stringify(req.body.autoAlertsConfig) : req.body.autoAlertsConfig;
     }
 
+    let daySchedulesJson = null;
+    if (daySchedules) {
+      daySchedulesJson = typeof daySchedules === 'object' ? JSON.stringify(daySchedules) : daySchedules;
+    }
+
     await pool.query(
       `UPDATE attendance_schedules 
        SET start_time = ?, end_time = ?, late_time = ?, linked_session_key = ?, 
+           day_schedules = ?,
            auto_message = ?, auto_message_student = ?, auto_message_parent = ?, auto_message_time = ?, auto_message_audience = 'absent',
            auto_alerts_config = COALESCE(?, auto_alerts_config)
        WHERE session_key = ?`,
@@ -454,6 +527,7 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
         endTime, 
         lateTime || null, 
         linkedSessionKey || null, 
+        daySchedulesJson,
         (studentMsg && studentMsg.trim()) ? studentMsg.trim() : null,
         (studentMsg && studentMsg.trim()) ? studentMsg.trim() : null,
         (parentMsg && parentMsg.trim()) ? parentMsg.trim() : null,
@@ -919,15 +993,16 @@ router.post('/mark', verifyStudent, async (req, res) => {
 
     // Fetch all schedules from dynamic table
     const [scheduleRows] = await pool.query(
-      'SELECT session_key, start_time, end_time, linked_session_key, late_time FROM attendance_schedules WHERE is_active = TRUE'
+      'SELECT session_key, start_time, end_time, linked_session_key, late_time, day_schedules FROM attendance_schedules WHERE is_active = TRUE'
     );
     
+    const now = getCurrentIST();
     const schedules = {};
     for (const row of scheduleRows) {
-      schedules[row.session_key] = { start: row.start_time, end: row.end_time };
+      const resolved = resolveScheduleForDate(row, now);
+      schedules[row.session_key] = { start: resolved.start_time, end: resolved.end_time };
     }
 
-    const now = getCurrentIST();
     let activeSessionType = null;
     let activeSchedule = null;
     
@@ -1136,15 +1211,16 @@ router.post('/manual-mark', verifyOperator, async (req, res) => {
 
     // 2. Find active session
     const [scheduleRows] = await pool.query(
-      'SELECT session_key, start_time, end_time FROM attendance_schedules WHERE is_active = TRUE'
+      'SELECT session_key, start_time, end_time, late_time, day_schedules FROM attendance_schedules WHERE is_active = TRUE'
     );
     
+    const now = getCurrentIST();
     const schedules = {};
     for (const row of scheduleRows) {
-      schedules[row.session_key] = { start: row.start_time, end: row.end_time };
+      const resolved = resolveScheduleForDate(row, now);
+      schedules[row.session_key] = { start: resolved.start_time, end: resolved.end_time };
     }
 
-    const now = getCurrentIST();
     let activeSessionType = null;
     let activeSchedule = null;
     
