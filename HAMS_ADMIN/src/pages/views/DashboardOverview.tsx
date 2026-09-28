@@ -15,13 +15,19 @@ import {
   FileText,
   AlertCircle,
   X,
-  Phone
+  Phone,
+  Calendar,
+  RotateCcw,
+  History
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
+import { renderSessionIcon } from '../../utils/sessionIcons';
 
 export const DashboardOverview: React.FC = () => {
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [stats, setStats] = useState<any>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string>('recent');
   const [loading, setLoading] = useState(true);
@@ -35,23 +41,25 @@ export const DashboardOverview: React.FC = () => {
   const [justifyModal, setJustifyModal] = useState<{ isOpen: boolean; student: any; reason: string; error?: string } | null>(null);
   const [submittingJustify, setSubmittingJustify] = useState(false);
 
-  useEffect(() => {
-    fetchStats(selectedSessionKey, true);
+  const isToday = selectedDate === todayStr;
 
-    // Live Real-Time Polling every 3 seconds
+  useEffect(() => {
+    fetchStats(selectedSessionKey, true, selectedDate);
+
+    // Live Real-Time Polling every 3 seconds (only active when viewing today's date)
     const interval = setInterval(() => {
-      if (!justifyModal?.isOpen) {
-        fetchStats(selectedSessionKey, false);
+      if (!justifyModal?.isOpen && selectedDate === new Date().toLocaleDateString('en-CA')) {
+        fetchStats(selectedSessionKey, false, selectedDate);
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [selectedSessionKey, justifyModal?.isOpen]);
+  }, [selectedSessionKey, justifyModal?.isOpen, selectedDate]);
 
-  const fetchStats = async (sessionKey = selectedSessionKey, isInitial = false) => {
+  const fetchStats = async (sessionKey = selectedSessionKey, isInitial = false, dateStr = selectedDate) => {
     if (isInitial) setLoading(true);
     try {
-      const res = await apiClient.get(`/admin/dashboard?session_key=${sessionKey}`);
+      const res = await apiClient.get(`/admin/dashboard?session_key=${sessionKey}&date=${dateStr}`);
       if (res.data.success) {
         setStats(res.data.data);
       } else {
@@ -67,7 +75,7 @@ export const DashboardOverview: React.FC = () => {
 
   const handleManualRefresh = () => {
     setRefreshing(true);
-    fetchStats(selectedSessionKey, true);
+    fetchStats(selectedSessionKey, true, selectedDate);
   };
 
   // Submit Justification from Dashboard
@@ -86,7 +94,7 @@ export const DashboardOverview: React.FC = () => {
     try {
       const datesToJustify = justifyModal.student.missed_dates && justifyModal.student.missed_dates.length > 0
         ? justifyModal.student.missed_dates
-        : [new Date().toISOString().slice(0, 10)];
+        : [selectedDate];
 
       const res = await apiClient.post('/attendance/session/absent-reason', {
         session_key: selectedSessionKey !== 'recent' && selectedSessionKey !== 'all' ? selectedSessionKey : 'night',
@@ -99,7 +107,7 @@ export const DashboardOverview: React.FC = () => {
 
       if (res.data.success) {
         setJustifyModal(null);
-        fetchStats(selectedSessionKey, false);
+        fetchStats(selectedSessionKey, false, selectedDate);
       } else {
         alert(res.data.message || 'Failed to save reason');
       }
@@ -210,66 +218,206 @@ export const DashboardOverview: React.FC = () => {
         </div>
       )}
 
-      {/* Dynamic Session Indicator Bar */}
+      {/* Dynamic Session & Date Filter Bar */}
       <div style={{
         display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '16px',
+        flexDirection: 'column',
+        gap: '14px',
         backgroundColor: '#ffffff',
-        padding: '16px 24px',
+        padding: '18px 22px',
         borderRadius: '16px',
         border: '1px solid #e2e8f0',
-        boxShadow: 'var(--shadow-sm)',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-            color: '#ffffff',
-            padding: '5px 14px',
-            borderRadius: '20px',
-            fontSize: '12px',
-            fontWeight: 800,
-            letterSpacing: '0.5px',
-          }}>
-            <Sparkles size={14} />
-            {isRecent ? 'RECENT SESSION' : 'SELECTED SESSION'}
-          </span>
-          <span style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
-            Showing Live: <strong style={{ color: '#4f46e5' }}>{currentSessionName}</strong>
-          </span>
+        {/* Tier 1: Session Live Indicator & Date Controls */}
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '14px',
+          paddingBottom: '12px',
+          borderBottom: '1px solid #f1f5f9'
+        }}>
+          {/* Left: Active Session Indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: isToday 
+                ? 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' 
+                : 'linear-gradient(135deg, #475569 0%, #334155 100%)',
+              color: '#ffffff',
+              padding: '5px 13px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 800,
+              letterSpacing: '0.5px',
+              boxShadow: isToday ? '0 2px 8px rgba(79, 70, 229, 0.2)' : 'none'
+            }}>
+              {isToday ? (
+                <>
+                  <Sparkles size={13} />
+                  {isRecent ? 'RECENT SESSION' : 'SELECTED SESSION'}
+                </>
+              ) : (
+                <>
+                  <History size={13} />
+                  HISTORICAL VIEW
+                </>
+              )}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
+                {isToday ? 'Showing Live:' : 'Session:'} <strong style={{ color: '#4f46e5' }}>{currentSessionName}</strong>
+              </span>
+              <span style={{
+                fontSize: '12px',
+                color: '#475569',
+                backgroundColor: '#f1f5f9',
+                padding: '3px 9px',
+                borderRadius: '8px',
+                fontWeight: 600
+              }}>
+                📅 {new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            </div>
+          </div>
+
+          {/* Right: Date Picker, Today Button, Live Status & Refresh */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            {/* Date Input Box */}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '5px 10px',
+              backgroundColor: '#f8fafc',
+              border: '1.5px solid #cbd5e1',
+              borderRadius: '10px',
+            }}>
+              <Calendar size={14} color="#4f46e5" />
+              <input
+                type="date"
+                value={selectedDate}
+                max={todayStr}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setSelectedDate(e.target.value);
+                  }
+                }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  outline: 'none',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit'
+                }}
+              />
+            </div>
+
+            {/* Quick Button to Jump Back to Today */}
+            {!isToday && (
+              <button
+                onClick={() => setSelectedDate(todayStr)}
+                title="Reset to current date"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '6px 12px',
+                  backgroundColor: '#e0e7ff',
+                  color: '#4338ca',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: '10px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <RotateCcw size={12} />
+                Today
+              </button>
+            )}
+
+            {/* Live Sync / Historical Badge */}
+            {isToday ? (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 12px',
+                backgroundColor: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                borderRadius: '20px',
+                fontSize: '11px',
+                fontWeight: 800,
+                color: '#059669',
+              }}>
+                <span style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  backgroundColor: '#10b981',
+                  boxShadow: '0 0 6px #10b981',
+                  animation: 'pulse 1.5s infinite',
+                }}></span>
+                LIVE SYNC
+              </div>
+            ) : (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 11px',
+                backgroundColor: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                borderRadius: '20px',
+                fontSize: '11px',
+                fontWeight: 700,
+                color: '#475569',
+              }}>
+                ARCHIVED
+              </div>
+            )}
+
+            {/* Manual Refresh Button */}
+            <button
+              onClick={handleManualRefresh}
+              title="Refresh Data"
+              style={{
+                padding: '7px',
+                borderRadius: '10px',
+                border: '1px solid #cbd5e1',
+                backgroundColor: '#ffffff',
+                color: '#64748b',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <RefreshCw size={15} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            </button>
+          </div>
         </div>
 
-        {/* Quick Filter Chips & Live Indicator */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-          
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 12px',
-            backgroundColor: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            borderRadius: '20px',
-            fontSize: '12px',
-            fontWeight: 800,
-            color: '#059669',
-            marginRight: '6px',
-          }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: '#10b981',
-              boxShadow: '0 0 8px #10b981',
-              animation: 'pulse 1.5s infinite',
-            }}></span>
-            LIVE SYNC
-          </div>
+        {/* Tier 2: Session Filter Chips with Icons */}
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginRight: '2px' }}>
+            Sessions:
+          </span>
 
           {(stats?.available_sessions || []).map((sess: any) => {
             const isSelected = selectedSessionKey === sess.session_key;
@@ -278,27 +426,35 @@ export const DashboardOverview: React.FC = () => {
                 key={sess.session_key}
                 onClick={() => setSelectedSessionKey(sess.session_key)}
                 style={{
-                  padding: '7px 14px',
-                  borderRadius: '20px',
+                  padding: '6px 13px',
+                  borderRadius: '10px',
                   border: isSelected ? '1.5px solid #4f46e5' : '1px solid #cbd5e1',
                   backgroundColor: isSelected ? '#4f46e5' : '#ffffff',
                   color: isSelected ? '#ffffff' : '#475569',
                   fontSize: '13px',
                   fontWeight: isSelected ? 700 : 500,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.15s ease',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
+                  boxShadow: isSelected ? '0 2px 6px rgba(79, 70, 229, 0.2)' : 'none'
                 }}
               >
-                {sess.session_name}
+                {renderSessionIcon(
+                  sess.icon_name, 
+                  sess.session_key, 
+                  14, 
+                  undefined, 
+                  { color: isSelected ? '#ffffff' : '#64748b' }
+                )}
+                <span>{sess.session_name}</span>
                 {sess.present_today > 0 && (
                   <span style={{
                     backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#e0e7ff',
                     color: isSelected ? '#ffffff' : '#4338ca',
-                    padding: '2px 7px',
-                    borderRadius: '10px',
+                    padding: '1px 6px',
+                    borderRadius: '6px',
                     fontSize: '11px',
                     fontWeight: 800,
                   }}>
@@ -308,24 +464,6 @@ export const DashboardOverview: React.FC = () => {
               </button>
             );
           })}
-
-          <button
-            onClick={handleManualRefresh}
-            title="Refresh Data"
-            style={{
-              padding: '8px',
-              borderRadius: '50%',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              color: '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <RefreshCw size={16} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-          </button>
         </div>
       </div>
 

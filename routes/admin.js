@@ -15,6 +15,10 @@ router.use(verifyAdminOrFloorLeader);
 router.get('/dashboard', async (req, res) => {
   try {
     const requestedSessionKey = req.query.session_key || 'recent';
+    const rawDate = req.query.date;
+    const targetDate = (rawDate && typeof rawDate === 'string' && rawDate.trim())
+      ? rawDate.trim().slice(0, 10)
+      : new Date().toLocaleDateString('en-CA');
 
     // Determine if requester is a floor leader
     let leaderFloors = null;
@@ -39,18 +43,19 @@ router.get('/dashboard', async (req, res) => {
     // 2. Fetch all configured dynamic sessions
     const [schedules] = await pool.query('SELECT session_key, session_name, icon_name FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC');
     
-    // 3. Find the most recent session taken/created (with records or latest session id)
+    // 3. Find the most recent session taken/created (with records or latest session id on or before targetDate)
     const [recentSessions] = await pool.query(`
       SELECT s.id, s.session_type, s.session_date, s.starts_at, s.ends_at, sch.session_name
       FROM attendance_sessions s
       LEFT JOIN attendance_schedules sch ON s.session_type = sch.session_key
-      ORDER BY s.id DESC
+      WHERE s.session_date <= ?
+      ORDER BY s.session_date DESC, s.id DESC
       LIMIT 1
-    `);
+    `, [targetDate]);
 
     let recentSessionKey = 'night';
     let recentSessionName = 'Night Attendance';
-    let recentSessionDate = new Date().toISOString().slice(0, 10);
+    let recentSessionDate = targetDate;
 
     if (recentSessions.length > 0) {
       recentSessionKey = recentSessions[0].session_type || 'night';
@@ -73,7 +78,7 @@ router.get('/dashboard', async (req, res) => {
       targetSessionName = foundSched ? foundSched.session_name : (activeFilterKey.charAt(0).toUpperCase() + activeFilterKey.slice(1) + ' Attendance');
     }
 
-    // 4. Compute Present and Late for the target session
+    // 4. Compute Present and Late for the target session on targetDate
     let present_today = 0;
     let late_today = 0;
 
@@ -91,8 +96,8 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
         JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = CURDATE() AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-      `, [leaderFloors, ...sessionParams]);
+        WHERE s.session_date = ? AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
+      `, [targetDate, leaderFloors, ...sessionParams]);
       present_today = presentRow ? presentRow.present_today : 0;
 
       const [[lateRow]] = await pool.query(`
@@ -100,8 +105,8 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
         JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = CURDATE() AND ar.is_late = TRUE AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-      `, [leaderFloors, ...sessionParams]);
+        WHERE s.session_date = ? AND ar.is_late = TRUE AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
+      `, [targetDate, leaderFloors, ...sessionParams]);
       late_today = lateRow ? parseInt(lateRow.late_today || 0, 10) : 0;
     } else {
       const [[presentRow]] = await pool.query(`
@@ -109,8 +114,8 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
         JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = CURDATE() AND st.is_active = TRUE ${sessionCondition}
-      `, sessionParams);
+        WHERE s.session_date = ? AND st.is_active = TRUE ${sessionCondition}
+      `, [targetDate, ...sessionParams]);
       present_today = presentRow ? presentRow.present_today : 0;
 
       const [[lateRow]] = await pool.query(`
@@ -118,22 +123,22 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
         JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE s.session_date = CURDATE() AND ar.is_late = TRUE AND st.is_active = TRUE ${sessionCondition}
-      `, sessionParams);
+        WHERE s.session_date = ? AND ar.is_late = TRUE AND st.is_active = TRUE ${sessionCondition}
+      `, [targetDate, ...sessionParams]);
       late_today = lateRow ? parseInt(lateRow.late_today || 0, 10) : 0;
     }
 
     const absent_today = Math.max(0, total_students - present_today);
 
-    // 5. Compute summary for each available session today
+    // 5. Compute summary for each available session on targetDate
     let allSessionsQuery = `
       SELECT s.session_type, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as present_count
       FROM attendance_sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id
       LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-      WHERE s.session_date = CURDATE() AND (st.is_active = TRUE OR ar.bank_code IS NULL)
+      WHERE s.session_date = ? AND (st.is_active = TRUE OR ar.bank_code IS NULL)
     `;
-    const allSessionsParams = [];
+    const allSessionsParams = [targetDate];
     if (leaderFloors && leaderFloors.length > 0) {
       allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
       allSessionsParams.push(leaderFloors);
@@ -151,24 +156,27 @@ router.get('/dashboard', async (req, res) => {
       {
         session_key: 'recent',
         session_name: `Recent (${recentSessionName})`,
+        icon_name: 'clock',
         actual_key: recentSessionKey,
         present_today: sessionCountsMap[recentSessionKey] || 0
       },
       ...schedules.map(s => ({
         session_key: s.session_key,
         session_name: s.session_name,
+        icon_name: s.icon_name || 'calendar',
         actual_key: s.session_key,
         present_today: sessionCountsMap[s.session_key] || 0
       })),
       {
         session_key: 'all',
         session_name: 'All Sessions Combined',
+        icon_name: 'users',
         actual_key: 'all',
         present_today: present_today
       }
     ];
 
-    // 6. Weekly Stats for the target session
+    // 6. 7-Day Trend leading up to targetDate
     let weeklySessionCondition = '';
     const weeklySessionParams = [];
     if (activeFilterKey !== 'all') {
@@ -184,9 +192,9 @@ router.get('/dashboard', async (req, res) => {
       FROM attendance_sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id
       LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-      WHERE s.session_date >= CURDATE() - INTERVAL 6 DAY AND (st.is_active = TRUE OR ar.bank_code IS NULL)
+      WHERE s.session_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? AND (st.is_active = TRUE OR ar.bank_code IS NULL)
     `;
-    const weeklyStatsParams = [];
+    const weeklyStatsParams = [targetDate, targetDate];
     if (leaderFloors && leaderFloors.length > 0) {
       weeklyStatsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
       weeklyStatsParams.push(leaderFloors);
@@ -208,7 +216,7 @@ router.get('/dashboard', async (req, res) => {
       };
     });
 
-    // 7. Floor Status for the selected session
+    // 7. Floor Status for the selected session on targetDate
     let floorsQuery = 'SELECT floor_id, floor_name FROM floors';
     const floorsParams = [];
     if (leaderFloors && leaderFloors.length > 0) {
@@ -218,14 +226,30 @@ router.get('/dashboard', async (req, res) => {
     floorsQuery += ' ORDER BY floor_id ASC';
     const [floors] = await pool.query(floorsQuery, floorsParams);
 
-    // Live present count per floor specifically for activeFilterKey on CURDATE()
+    // Live present count per floor specifically for activeFilterKey on targetDate
     let floorPresentQuery = `
       SELECT st.floor_id, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count
       FROM attendance_records ar
       JOIN attendance_sessions s ON ar.session_id = s.id
       JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-      WHERE s.session_date = CURDATE() AND st.is_active = TRUE
+      WHERE s.session_date = ? AND st.is_active = TRUE
     `;
+    const floorPresentParams = [targetDate];
+    if (activeFilterKey !== 'all') {
+      floorPresentQuery += ' AND s.session_type = ?';
+      floorPresentParams.push(activeFilterKey);
+    }
+    if (leaderFloors && leaderFloors.length > 0) {
+      floorPresentQuery += ' AND st.floor_id IN (?)';
+      floorPresentParams.push(leaderFloors);
+    }
+    floorPresentQuery += ' GROUP BY st.floor_id';
+
+    const [floorPresentRows] = await pool.query(floorPresentQuery, floorPresentParams);
+    const floorPresentMap = {};
+    for (const row of floorPresentRows) {
+      floorPresentMap[row.floor_id] = row.present_count;
+    }
     const floorPresentParams = [];
     if (activeFilterKey !== 'all') {
       floorPresentQuery += ' AND s.session_type = ?';
@@ -271,9 +295,9 @@ router.get('/dashboard', async (req, res) => {
       };
     });
 
-    // 8. Find students absent for the last 3 occurrences of the selected session
-    let distinctDatesQuery = 'SELECT DISTINCT session_date FROM attendance_sessions WHERE 1=1';
-    const distinctDatesParams = [];
+    // 8. Find students absent for the last 3 occurrences of the selected session on or before targetDate
+    let distinctDatesQuery = 'SELECT DISTINCT session_date FROM attendance_sessions WHERE session_date <= ?';
+    const distinctDatesParams = [targetDate];
     if (activeFilterKey !== 'all') {
       distinctDatesQuery += ' AND session_type = ?';
       distinctDatesParams.push(activeFilterKey);
@@ -292,9 +316,9 @@ router.get('/dashboard', async (req, res) => {
     });
 
     if (targetDates.length === 0) {
-      const today = new Date();
+      const baseDate = new Date(targetDate);
       targetDates = [0, 1, 2].map(offset => {
-        const d = new Date(today);
+        const d = new Date(baseDate);
         d.setDate(d.getDate() - offset);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       });
@@ -526,6 +550,7 @@ router.get('/dashboard', async (req, res) => {
         floor_status,
         consecutive_absentees,
         target_dates: targetDates,
+        selected_date: targetDate,
         is_leader_view: Boolean(leaderFloors && leaderFloors.length > 0),
         assigned_floors: leaderFloors || []
       }
