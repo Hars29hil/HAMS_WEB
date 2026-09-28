@@ -20,7 +20,7 @@ import {
   RotateCcw,
   History
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
 import { renderSessionIcon } from '../../utils/sessionIcons';
@@ -161,11 +161,17 @@ export const DashboardOverview: React.FC = () => {
   const currentSessionName = stats?.current_session?.name || 'Recent Attendance';
   const isRecent = stats?.current_session?.is_recent;
 
-  const chartData = (stats?.weekly_stats || []).map((s: any) => ({
-    name: new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-    present: s.present,
-    late: s.late,
-  }));
+  const chartData = (stats?.weekly_stats || []).map((s: any) => {
+    const presentCount = s.present || 0;
+    const lateCount = s.late || 0;
+    const absentCount = s.absent !== undefined ? s.absent : Math.max(0, (stats?.total_students || 0) - presentCount);
+    return {
+      name: new Date(s.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      present: presentCount,
+      late: lateCount,
+      absent: absentCount,
+    };
+  });
 
   // Filter 3-Day Absentees list
   const absenteesList: any[] = stats?.consecutive_absentees || [];
@@ -591,8 +597,16 @@ export const DashboardOverview: React.FC = () => {
                       boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                     }}
                   />
-                  <Bar dataKey="present" name="Present" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
-                  <Bar dataKey="late" name="Late" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right" 
+                    height={30} 
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingBottom: '8px' }} 
+                  />
+                  <Bar dataKey="present" name="Present" fill="#10b981" radius={[4, 4, 0, 0]} barSize={14} />
+                  <Bar dataKey="late" name="Late" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={14} />
+                  <Bar dataKey="absent" name="Absent" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={14} />
                 </BarChart>
               </ResponsiveContainer>
             )}

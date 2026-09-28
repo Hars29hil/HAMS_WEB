@@ -209,10 +209,14 @@ router.get('/dashboard', async (req, res) => {
       const year = dateObj.getFullYear();
       const month = String(dateObj.getMonth() + 1).padStart(2, '0');
       const day = String(dateObj.getDate()).padStart(2, '0');
+      const presentCount = parseInt(row.present || 0, 10);
+      const lateCount = parseInt(row.late || 0, 10);
+      const absentCount = Math.max(0, total_students - presentCount);
       return {
         date: `${year}-${month}-${day}`,
-        present: row.present,
-        late: parseInt(row.late || 0, 10)
+        present: presentCount,
+        late: lateCount,
+        absent: absentCount
       };
     });
 
