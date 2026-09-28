@@ -1018,8 +1018,9 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: '130px' }}>
               <option value="All">All Status</option>
               <option value="Present">Present</option>
-              <option value="Absent">Absent</option>
               <option value="Late">Late</option>
+              <option value="Absent">Absent</option>
+              <option value="Leave">Leave</option>
             </select>
 
             <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
@@ -1092,10 +1093,14 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                       borderRadius: '12px',
                       fontSize: '12px',
                       fontWeight: 700,
-                      backgroundColor: s.status === 'Present' ? '#ecfdf5' : (s.status === 'Late' ? '#fef3c7' : '#fef2f2'),
-                      color: s.status === 'Present' ? '#166534' : (s.status === 'Late' ? '#92400e' : '#991b1b'),
+                      backgroundColor: s.status === 'Present' ? '#ecfdf5' : (s.status === 'Late' ? '#fef3c7' : (s.status === 'Leave' ? '#ede9fe' : '#fef2f2')),
+                      color: s.status === 'Present' ? '#166534' : (s.status === 'Late' ? '#92400e' : (s.status === 'Leave' ? '#6d28d9' : '#991b1b')),
+                      border: s.status === 'Leave' ? '1px solid #ddd6fe' : undefined,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
                     }}>
-                      {s.status}
+                      {s.status === 'Leave' ? '🏖️ Leave' : s.status}
                     </span>
                   </td>
                   <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '13px', maxWidth: '200px' }}>

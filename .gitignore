@@ -34,3 +34,18 @@ scratch/
 Thumbs.db
 .vscode/
 .idea/
+
+# Scratch & test scripts
+scratch_*.js
+check_*.js
+alter_*.js
+migrate*.js
+run_migration.js
+cleanup.js
+generate_sql.js
+fetch_api.js
+test*.js
+test-*.js
+api_*.json
+sample_*.json
+

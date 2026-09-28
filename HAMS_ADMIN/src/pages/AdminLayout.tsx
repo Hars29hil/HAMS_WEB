@@ -11,6 +11,7 @@ import { WhatsAppMessagingView } from './views/WhatsAppMessagingView';
 import { LiveAttendanceManager } from './views/LiveAttendanceManager';
 import { CreateSessionView } from './views/CreateSessionView';
 import { DeviceSecurityView } from './views/DeviceSecurityView';
+import { LeavesManagementView } from './views/LeavesManagementView';
 
 const SessionViewWrapper: React.FC<{ onSessionDeleted: () => void }> = ({ onSessionDeleted }) => {
   const { sessionKey } = useParams<{ sessionKey: string }>();
@@ -59,6 +60,9 @@ export const AdminLayout: React.FC = () => {
     if (p === '/security') {
       return { title: 'Proxy & Multi-Account Security Audit', subtitle: 'Detect and resolve cross-student logins from same IP / Device' };
     }
+    if (p === '/leaves') {
+      return { title: 'Approved Leave Management', subtitle: 'Sync and track college approved leaves and auto-excused attendance' };
+    }
     if (p === '/session_add' || p === '/add_session') {
       return { title: 'Create Session', subtitle: 'Add a new dynamic attendance schedule' };
     }
@@ -96,6 +100,7 @@ export const AdminLayout: React.FC = () => {
             <Route path="/students" element={<StudentsManagementView />} />
             <Route path="/leaders" element={<LeadersManagementView />} />
             <Route path="/messages" element={<WhatsAppMessagingView />} />
+            <Route path="/leaves" element={<LeavesManagementView />} />
             <Route path="/security" element={<DeviceSecurityView />} />
             <Route path="/session_add" element={<CreateSessionView onAdded={() => { fetchSessions(); navigate('/'); }} />} />
             <Route path="/add_session" element={<CreateSessionView onAdded={() => { fetchSessions(); navigate('/'); }} />} />

@@ -353,6 +353,38 @@ router.get('/dashboard', async (req, res) => {
       } catch (justErr) {
         console.warn('Absent reasons query warning in dashboard:', justErr.message);
       }
+
+      // Check student_leaves for target dates
+      try {
+        const [leaveRows] = await pool.query(`
+          SELECT student_id, bank_code, start_time, end_time, reason
+          FROM student_leaves
+          WHERE status = 'approved' AND (
+            DATE(start_time) <= ? AND DATE(end_time) >= ?
+          )
+        `, [targetDates[0], targetDates[targetDates.length - 1]]);
+        
+        for (const lv of leaveRows) {
+          const lStart = new Date(lv.start_time).toISOString().slice(0, 10);
+          const lEnd = new Date(lv.end_time).toISOString().slice(0, 10);
+          const cleanBank = lv.bank_code ? String(lv.bank_code).replace(/^0+/, '') : '';
+
+          for (const d of targetDates) {
+            if (d >= lStart && d <= lEnd) {
+              if (lv.student_id) {
+                justifiedSet.add(`${lv.student_id}_${d}`);
+                justificationMap.set(`${lv.student_id}_${d}`, `[Approved Leave] ${lv.reason || 'Approved Leave'}`);
+              }
+              if (cleanBank) {
+                justifiedSet.add(`${cleanBank}_${d}`);
+                justificationMap.set(`${cleanBank}_${d}`, `[Approved Leave] ${lv.reason || 'Approved Leave'}`);
+              }
+            }
+          }
+        }
+      } catch (lvErr) {
+        console.warn('Leave records query warning in dashboard:', lvErr.message);
+      }
     }
 
     const attendedSet = new Set();

@@ -10,7 +10,8 @@ import {
   LogOut,
   ShieldCheck,
   ShieldAlert,
-  UserCheck
+  UserCheck,
+  Palmtree
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './AdminSidebar.css';
@@ -103,6 +104,14 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         >
           <MessageSquare size={18} className="nav-icon" />
           <span>WhatsApp Messaging</span>
+        </button>
+
+        <button
+          className={`nav-item-btn ${pathname === '/leaves' ? 'active' : ''}`}
+          onClick={() => handleNavClick('/leaves')}
+        >
+          <Palmtree size={18} className="nav-icon" style={{ color: '#8b5cf6' }} />
+          <span>Approved Leaves</span>
         </button>
 
         <button

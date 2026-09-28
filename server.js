@@ -16,6 +16,8 @@ const whatsappRoutes = require('./routes/whatsapp');
 const notificationRoutes = require('./routes/notification');
 const tagsRoutes = require('./routes/tags');
 const leadersRoutes = require('./routes/leaders');
+const leavesRoutes = require('./routes/leaves');
+const leaveService = require('./services/leaveService');
 
 const app = express();
 
@@ -243,15 +245,39 @@ const pool = require('./config/db');
           resolved_at DATETIME DEFAULT NULL,
           details TEXT DEFAULT NULL,
           attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          INDEX (ip_address),
-          INDEX (primary_student_id),
           INDEX (attempted_student_id),
           INDEX (attempted_at)
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS student_leaves (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          bank_code VARCHAR(50) NOT NULL,
+          student_id INT NULL,
+          first_name VARCHAR(100) NULL,
+          middle_name VARCHAR(100) NULL,
+          last_name VARCHAR(100) NULL,
+          phone VARCHAR(50) NULL,
+          room VARCHAR(50) NULL,
+          aadhar VARCHAR(50) NULL,
+          start_time DATETIME NOT NULL,
+          end_time DATETIME NOT NULL,
+          status VARCHAR(50) DEFAULT 'approved',
+          reason TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_leave_bank_start (bank_code, start_time),
+          INDEX idx_bank (bank_code),
+          INDEX idx_student (student_id),
+          INDEX idx_dates (start_time, end_time)
         )
       `);
     } catch(e) {}
 
     console.log('Database schema auto-migration successful.');
+    // Trigger non-blocking leave sync
+    leaveService.syncLeaves().catch(err => console.warn('Initial leave sync warning:', err.message));
   } catch (err) {
     console.error(`Error migrating schema: ${err.message}`);
   }
@@ -377,6 +403,8 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/notification', notificationRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/leaders', leadersRoutes);
+app.use('/api/leaves', leavesRoutes);
+app.use('/api/admin/leaves', leavesRoutes);
 
 // Fallback error handler
 app.use((err, req, res, next) => {

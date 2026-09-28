@@ -1555,9 +1555,13 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
              ar.marked_at, 
              IF(ar.session_id IS NULL, false, true) as is_present,
              COALESCE(ar.is_late, false) as is_late,
-             NULL as attendance_remarks,
+             ar.remarks as attendance_remarks,
              aar.reason as absent_reason,
-             aar.is_justified
+             aar.is_justified,
+             sl.id as leave_id,
+             sl.reason as leave_reason,
+             sl.start_time as leave_start,
+             sl.end_time as leave_end
       FROM students s
       LEFT JOIN (
         SELECT id, session_date, session_type 
@@ -1567,11 +1571,16 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       ) ses ON 1=1
       LEFT JOIN attendance_records ar ON (ar.session_id = ses.id AND (s.student_code = ar.bank_code OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM ar.bank_code)))
       LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND aar.session_date = ? AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
+      LEFT JOIN student_leaves sl ON (
+        (s.id = sl.student_id OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM sl.bank_code))
+        AND sl.status = 'approved'
+        AND ? BETWEEN DATE(sl.start_time) AND DATE(sl.end_time)
+      )
       WHERE s.is_active = TRUE ${floorCondition} ${targetCondition}
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionType, sessionDate, sessionType];
+    const queryParams = [sessionDate, sessionType, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
@@ -1606,12 +1615,24 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
     const formattedRows = rows.map(r => {
       const isPresent = Boolean(r.is_present && r.is_present !== 0 && r.is_present !== '0');
       const isLate = Boolean(r.is_late && r.is_late !== 0 && r.is_late !== '0');
-      const status = isPresent ? (isLate ? 'Late' : 'Present') : 'Absent';
+      const isOnLeave = Boolean(r.leave_id || (r.absent_reason && r.absent_reason.includes('[Approved Leave]')));
+      
+      let status = 'Absent';
+      if (isPresent) {
+        status = isLate ? 'Late' : 'Present';
+      } else if (isOnLeave) {
+        status = 'Leave';
+      }
+
+      const effectiveReason = r.leave_reason ? `[Approved Leave] ${r.leave_reason}` : (r.absent_reason || null);
+      const isJustified = isPresent ? true : (isOnLeave ? true : Boolean(r.is_justified));
+
       return {
         ...r,
         status,
-        reason: r.absent_reason || null,
-        remarks: r.attendance_remarks || null,
+        is_justified: isJustified,
+        reason: effectiveReason,
+        remarks: r.attendance_remarks || (isOnLeave ? (r.leave_reason || 'Approved Leave') : null),
         tags: tagsMap[r.student_id] || []
       };
     });
@@ -1682,8 +1703,10 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
 
     const query = `
       SELECT s.id as student_id, s.student_code, s.name, s.floor_id, s.room_number,
-             aar.reason,
-             aar.is_justified
+             COALESCE(aar.reason, CONCAT('[Approved Leave] ', sl.reason)) as reason,
+             IF(sl.id IS NOT NULL, 1, COALESCE(aar.is_justified, 0)) as is_justified,
+             sl.id as leave_id,
+             sl.reason as leave_reason
       FROM students s
       LEFT JOIN (
         SELECT id, session_date, session_type 
@@ -1693,11 +1716,16 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
       ) ses ON 1=1
       LEFT JOIN attendance_records ar ON (s.student_code = ar.bank_code OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM ar.bank_code)) AND ar.session_id = ses.id
       LEFT JOIN attendance_absent_reasons aar ON s.id = aar.student_id AND aar.session_date = ? AND (LOWER(aar.session_type) = LOWER(?) OR aar.session_type IS NULL)
+      LEFT JOIN student_leaves sl ON (
+        (s.id = sl.student_id OR TRIM(LEADING '0' FROM s.student_code) = TRIM(LEADING '0' FROM sl.bank_code))
+        AND sl.status = 'approved'
+        AND ? BETWEEN DATE(sl.start_time) AND DATE(sl.end_time)
+      )
       WHERE s.is_active = TRUE AND ar.session_id IS NULL ${floorCondition} ${targetCondition}
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionType, sessionDate, sessionType];
+    const queryParams = [sessionDate, sessionType, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
