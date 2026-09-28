@@ -60,11 +60,11 @@ router.get('/dashboard', async (req, res) => {
       const [rSessions] = await pool.query(`
         SELECT s.id, s.session_type, s.session_date, s.starts_at, s.ends_at, sch.session_name
         FROM attendance_sessions s
-        LEFT JOIN attendance_schedules sch ON s.session_type = sch.session_key
-        WHERE (s.session_date <= ? OR DATE(s.session_date) <= ?)
+        LEFT JOIN attendance_schedules sch ON LOWER(s.session_type) = LOWER(sch.session_key)
+        WHERE (LEFT(s.session_date, 10) <= ? OR s.session_date <= ? OR DATE(s.session_date) <= ?)
         ORDER BY s.session_date DESC, s.id DESC
         LIMIT 1
-      `, [targetDate, targetDate]);
+      `, [targetDate, targetDate, targetDate]);
       recentSessions = rSessions || [];
     } catch (e) {
       console.warn('Dashboard recentSessions query warning:', e.message);
@@ -91,7 +91,7 @@ router.get('/dashboard', async (req, res) => {
 
     let targetSessionName = 'All Combined';
     if (activeFilterKey !== 'all') {
-      const foundSched = schedules.find(s => s.session_key === activeFilterKey);
+      const foundSched = schedules.find(s => s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
       targetSessionName = foundSched ? foundSched.session_name : (activeFilterKey.charAt(0).toUpperCase() + activeFilterKey.slice(1) + ' Attendance');
     }
 
@@ -103,7 +103,7 @@ router.get('/dashboard', async (req, res) => {
     const sessionParams = [];
 
     if (activeFilterKey !== 'all') {
-      sessionCondition = 'AND s.session_type = ?';
+      sessionCondition = 'AND LOWER(s.session_type) = LOWER(?)';
       sessionParams.push(activeFilterKey);
     }
 
@@ -113,40 +113,79 @@ router.get('/dashboard', async (req, res) => {
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-        `, [targetDate, targetDate, leaderFloors, ...sessionParams]);
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+            AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
+            AND st.floor_id IN (?) ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, targetDate, leaderFloors, ...sessionParams]);
         present_today = presentRow ? (parseInt(presentRow.present_today, 10) || 0) : 0;
 
         const [[lateRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (ar.is_late = TRUE OR ar.is_late = 1) AND st.is_active = TRUE AND st.floor_id IN (?) ${sessionCondition}
-        `, [targetDate, targetDate, leaderFloors, ...sessionParams]);
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+            AND (ar.is_late = TRUE OR ar.is_late = 1)
+            AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
+            AND st.floor_id IN (?) ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, targetDate, leaderFloors, ...sessionParams]);
         late_today = lateRow ? (parseInt(lateRow.late_today, 10) || 0) : 0;
       } else {
         const [[presentRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE ${sessionCondition}
-        `, [targetDate, targetDate, ...sessionParams]);
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+            AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
+            ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, targetDate, ...sessionParams]);
         present_today = presentRow ? (parseInt(presentRow.present_today, 10) || 0) : 0;
 
         const [[lateRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (ar.is_late = TRUE OR ar.is_late = 1) AND st.is_active = TRUE ${sessionCondition}
-        `, [targetDate, targetDate, ...sessionParams]);
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+            AND (ar.is_late = TRUE OR ar.is_late = 1)
+            AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
+            ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, targetDate, ...sessionParams]);
         late_today = lateRow ? (parseInt(lateRow.late_today, 10) || 0) : 0;
       }
     } catch (e) {
       console.warn('Dashboard present/late query warning:', e.message);
+    }
+
+    // 5. Compute summary for each available session on targetDate
+    const sessionCountsMap = {};
+    try {
+      let allSessionsQuery = `
+        SELECT s.session_type, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as present_count
+        FROM attendance_sessions s
+        LEFT JOIN attendance_records ar ON s.id = ar.session_id
+        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
+        WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          AND (st.is_active = TRUE OR ar.bank_code IS NULL OR ar.bank_code IS NOT NULL)
+      `;
+      const allSessionsParams = [targetDate, targetDate, targetDate, targetDate];
+      if (leaderFloors && leaderFloors.length > 0) {
+        allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
+        allSessionsParams.push(leaderFloors);
+      }
+      allSessionsQuery += ' GROUP BY s.session_type';
+
+      const [allSessionsToday] = await pool.query(allSessionsQuery, allSessionsParams);
+      for (const row of allSessionsToday) {
+        if (row.session_type) {
+          sessionCountsMap[row.session_type.toLowerCase()] = parseInt(row.present_count || 0, 10);
+          sessionCountsMap[row.session_type] = parseInt(row.present_count || 0, 10);
+        }
+      }
+    } catch (e) {
+      console.warn('Dashboard allSessionsToday query warning:', e.message);
     }
 
     let isSessionConductedOrStarted = false;
@@ -156,8 +195,13 @@ router.get('/dashboard', async (req, res) => {
       const nowIST = getCurrentIST();
       const todayStr = `${nowIST.getFullYear()}-${String(nowIST.getMonth() + 1).padStart(2, '0')}-${String(nowIST.getDate()).padStart(2, '0')}`;
       
-      if (targetDate === todayStr && activeFilterKey !== 'all') {
-        const foundSched = schedules.find(s => s.session_key === activeFilterKey);
+      if (targetDate < todayStr) {
+        // If it's a past date, check if a session was created/conducted on that date
+        if (sessionCountsMap[activeFilterKey.toLowerCase()] !== undefined || sessionCountsMap[activeFilterKey] !== undefined) {
+          isSessionConductedOrStarted = true;
+        }
+      } else if (targetDate === todayStr && activeFilterKey !== 'all') {
+        const foundSched = schedules.find(s => s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
         if (foundSched && foundSched.start_time && foundSched.end_time) {
           const nowMins = nowIST.getHours() * 60 + nowIST.getMinutes();
           const [sH, sM] = (foundSched.start_time || '00:00').split(':').map(Number);
@@ -175,47 +219,20 @@ router.get('/dashboard', async (req, res) => {
 
     const absent_today = isSessionConductedOrStarted ? Math.max(0, total_students - present_today) : 0;
 
-    // 5. Compute summary for each available session on targetDate
-    const sessionCountsMap = {};
-    try {
-      let allSessionsQuery = `
-        SELECT s.session_type, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as present_count
-        FROM attendance_sessions s
-        LEFT JOIN attendance_records ar ON s.id = ar.session_id
-        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND (st.is_active = TRUE OR ar.bank_code IS NULL)
-      `;
-      const allSessionsParams = [targetDate, targetDate];
-      if (leaderFloors && leaderFloors.length > 0) {
-        allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
-        allSessionsParams.push(leaderFloors);
-      }
-      allSessionsQuery += ' GROUP BY s.session_type';
-
-      const [allSessionsToday] = await pool.query(allSessionsQuery, allSessionsParams);
-      for (const row of allSessionsToday) {
-        if (row.session_type) {
-          sessionCountsMap[row.session_type] = parseInt(row.present_count || 0, 10);
-        }
-      }
-    } catch (e) {
-      console.warn('Dashboard allSessionsToday query warning:', e.message);
-    }
-
     const available_sessions = [
       {
         session_key: 'recent',
         session_name: `Recent (${recentSessionName})`,
         icon_name: 'clock',
         actual_key: recentSessionKey,
-        present_today: sessionCountsMap[recentSessionKey] || 0
+        present_today: sessionCountsMap[recentSessionKey.toLowerCase()] || sessionCountsMap[recentSessionKey] || 0
       },
       ...schedules.map(s => ({
         session_key: s.session_key,
         session_name: s.session_name,
         icon_name: s.icon_name || 'calendar',
         actual_key: s.session_key,
-        present_today: sessionCountsMap[s.session_key] || 0
+        present_today: sessionCountsMap[s.session_key.toLowerCase()] || sessionCountsMap[s.session_key] || 0
       })),
       {
         session_key: 'all',
@@ -232,27 +249,27 @@ router.get('/dashboard', async (req, res) => {
       let weeklySessionCondition = '';
       const weeklySessionParams = [];
       if (activeFilterKey !== 'all') {
-        weeklySessionCondition = 'AND s.session_type = ?';
+        weeklySessionCondition = 'AND LOWER(s.session_type) = LOWER(?)';
         weeklySessionParams.push(activeFilterKey);
       }
 
       let weeklyStatsQuery = `
         SELECT 
-          s.session_date AS date, 
+          LEFT(s.session_date, 10) AS date, 
           COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present,
           SUM(CASE WHEN ar.is_late = TRUE OR ar.is_late = 1 THEN 1 ELSE 0 END) AS late
         FROM attendance_sessions s
         JOIN attendance_records ar ON s.id = ar.session_id
         LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE (s.session_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR DATE(s.session_date) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?)
-          AND (st.is_active = TRUE OR ar.bank_code IS NULL)
+        WHERE (LEFT(s.session_date, 10) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR s.session_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR DATE(s.session_date) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?)
+          AND (st.is_active = TRUE OR ar.bank_code IS NULL OR ar.bank_code IS NOT NULL)
       `;
-      const weeklyStatsParams = [targetDate, targetDate, targetDate, targetDate];
+      const weeklyStatsParams = [targetDate, targetDate, targetDate, targetDate, targetDate, targetDate];
       if (leaderFloors && leaderFloors.length > 0) {
         weeklyStatsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
         weeklyStatsParams.push(leaderFloors);
       }
-      weeklyStatsQuery += ` ${weeklySessionCondition} GROUP BY s.session_date ORDER BY s.session_date ASC`;
+      weeklyStatsQuery += ` ${weeklySessionCondition} GROUP BY LEFT(s.session_date, 10) ORDER BY LEFT(s.session_date, 10) ASC`;
       weeklyStatsParams.push(...weeklySessionParams);
 
       const [weeklyStatsRows] = await pool.query(weeklyStatsQuery, weeklyStatsParams);
@@ -290,11 +307,12 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
         JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-        WHERE (s.session_date = ? OR DATE(s.session_date) = ?) AND st.is_active = TRUE
+        WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          AND (st.is_active = TRUE OR st.is_active IS NULL)
       `;
-      const floorPresentParams = [targetDate, targetDate];
+      const floorPresentParams = [targetDate, targetDate, targetDate, targetDate];
       if (activeFilterKey !== 'all') {
-        floorPresentQuery += ' AND s.session_type = ?';
+        floorPresentQuery += ' AND LOWER(s.session_type) = LOWER(?)';
         floorPresentParams.push(activeFilterKey);
       }
       if (leaderFloors && leaderFloors.length > 0) {
@@ -344,17 +362,17 @@ router.get('/dashboard', async (req, res) => {
     let distinctDatesRows = [];
     try {
       let distinctDatesQuery = `
-        SELECT DISTINCT ses.session_date 
+        SELECT DISTINCT LEFT(ses.session_date, 10) as session_date 
         FROM attendance_sessions ses
         JOIN attendance_records ar ON ses.id = ar.session_id
-        WHERE (ses.session_date <= ? OR DATE(ses.session_date) <= ?)
+        WHERE (LEFT(ses.session_date, 10) <= ? OR ses.session_date <= ? OR DATE(ses.session_date) <= ?)
       `;
-      const distinctDatesParams = [targetDate, targetDate];
+      const distinctDatesParams = [targetDate, targetDate, targetDate];
       if (activeFilterKey !== 'all') {
-        distinctDatesQuery += ' AND ses.session_type = ?';
+        distinctDatesQuery += ' AND LOWER(ses.session_type) = LOWER(?)';
         distinctDatesParams.push(activeFilterKey);
       }
-      distinctDatesQuery += ' ORDER BY ses.session_date DESC LIMIT 3';
+      distinctDatesQuery += ' ORDER BY LEFT(ses.session_date, 10) DESC LIMIT 3';
       const [rows] = await pool.query(distinctDatesQuery, distinctDatesParams);
       distinctDatesRows = rows || [];
     } catch (dErr) {
@@ -401,14 +419,14 @@ router.get('/dashboard', async (req, res) => {
     if (targetDates.length > 0) {
       try {
         let recQuery = `
-          SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, ar.student_id, ses.session_date
+          SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, ar.student_id, LEFT(ses.session_date, 10) as session_date
           FROM attendance_records ar
           JOIN attendance_sessions ses ON ar.session_id = ses.id
-          WHERE ses.session_date IN (?) OR DATE(ses.session_date) IN (?)
+          WHERE LEFT(ses.session_date, 10) IN (?) OR ses.session_date IN (?) OR DATE(ses.session_date) IN (?)
         `;
-        const recParams = [targetDates, targetDates];
+        const recParams = [targetDates, targetDates, targetDates];
         if (activeFilterKey !== 'all') {
-          recQuery += ' AND ses.session_type = ?';
+          recQuery += ' AND LOWER(ses.session_type) = LOWER(?)';
           recParams.push(activeFilterKey);
         }
         const [recRows] = await pool.query(recQuery, recParams);
