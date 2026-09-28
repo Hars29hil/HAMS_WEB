@@ -969,27 +969,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
 
             <div className="advanced-settings-header" style={{ marginTop: '20px' }}>Linked Attendance Settings</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              <div className="time-input-field">
-                <label>Late Criteria Time</label>
-                <input
-                  type="time"
-                  value={lateTime || ''}
-                  onChange={e => setLateTime(e.target.value || null)}
-                />
-                {lateTime && (
-                  <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                    <Info size={13} /> Late cutoff enabled.
-                    <button
-                      onClick={() => setLateTime(null)}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
-              </div>
-
+            <div style={{ maxWidth: '400px' }}>
               <div className="time-input-field">
                 <label>Linked Attendance (Auto-mark)</label>
                 <select
