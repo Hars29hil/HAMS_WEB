@@ -112,27 +112,59 @@ export const WhatsAppMessagingView: React.FC = () => {
     }
   };
 
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
+  const getStudentAttendance = (s: any) => {
+    if (!s) return null;
+    const idKey = String(s.id);
+    const rawCode = String(s.student_code || s.bank_code || s.bankCode || '').trim();
+    const unpadded = rawCode.replace(/^0+/, '');
+    const padded = rawCode ? rawCode.padStart(4, '0') : '';
+
+    return (
+      sessionAttendanceMap[idKey] ||
+      sessionAttendanceMap[rawCode] ||
+      (unpadded ? sessionAttendanceMap[unpadded] : undefined) ||
+      (padded ? sessionAttendanceMap[padded] : undefined) ||
+      null
+    );
+  };
+
   const fetchSessionAttendance = async () => {
     if (!selectedSession || selectedSession === 'all') {
       setSessionAttendanceMap({});
       return;
     }
+    setAttendanceLoading(true);
     try {
       const res = await apiClient.get(`/attendance/session/${selectedSession}/students?date=${selectedDate}`);
       if (res.data?.success && Array.isArray(res.data.data)) {
-        const map: Record<string, { status: string; marked_at?: string; is_late?: boolean }> = {};
+        const map: Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }> = {};
         for (const item of res.data.data) {
-          const sCode = String(item.student_code || item.student_id);
-          map[sCode] = {
-            status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : 'Absent'),
+          const entry = {
+            status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : (item.leave_id ? 'Leave' : 'Absent')),
             marked_at: item.marked_at,
-            is_late: item.is_late
+            is_late: Boolean(item.is_late),
+            reason: item.reason || item.absent_reason || item.leave_reason || null
           };
+
+          if (item.student_id !== undefined && item.student_id !== null) {
+            map[String(item.student_id)] = entry;
+          }
+          if (item.student_code) {
+            const codeStr = String(item.student_code).trim();
+            map[codeStr] = entry;
+            const unpadded = codeStr.replace(/^0+/, '');
+            if (unpadded) map[unpadded] = entry;
+            map[codeStr.padStart(4, '0')] = entry;
+          }
         }
         setSessionAttendanceMap(map);
       }
     } catch (e) {
       console.warn('Failed to load session attendance for filter:', e);
+    } finally {
+      setAttendanceLoading(false);
     }
   };
 
@@ -208,8 +240,8 @@ export const WhatsAppMessagingView: React.FC = () => {
       for (const s of students) {
         const sCode = String(s.student_code || s.id);
         if (selectedStudentIds.has(sCode)) {
-          const studentAttendance = sessionAttendanceMap[sCode];
-          const studentStatus = studentAttendance ? studentAttendance.status : 'N/A';
+          const studentAttendance = getStudentAttendance(s);
+          const studentStatus = studentAttendance ? studentAttendance.status : 'Absent';
 
           let text = messageText;
           text = text.replace(/{name}/gi, s.name || 'Student');
@@ -276,23 +308,49 @@ export const WhatsAppMessagingView: React.FC = () => {
   // FILTERING STUDENTS: Search + Floor + Attendance Status
   const filteredStudents = students.filter(s => {
     const sCode = String(s.student_code || s.id);
-    const nameMatch = (s.name || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const idMatch = sCode.toLowerCase().includes(searchQuery.toLowerCase());
-    const roomMatch = (s.room_number || '').toLowerCase().includes(searchQuery.toLowerCase());
-    if (!nameMatch && !idMatch && !roomMatch) return false;
+    const sName = String(s.name || '').toLowerCase();
+    const sRoom = String(s.room_number || '').toLowerCase();
+    const sPhone = String(s.assigned_mobile || s.phone_number || '');
+    const pPhone = String(s.parent_phone || s.father_phone || s.mother_phone || '');
+    const query = searchQuery.trim().toLowerCase();
 
-    // Floor filter
-    if (selectedFloor !== 'all') {
-      if (String(s.floor_id) !== String(selectedFloor)) return false;
+    // 1. Search Query Match
+    if (query) {
+      const matchName = sName.includes(query);
+      const matchCode = sCode.toLowerCase().includes(query) || sCode.replace(/^0+/, '').includes(query);
+      const matchRoom = sRoom.includes(query);
+      const matchPhone = sPhone.includes(query) || pPhone.includes(query);
+      if (!matchName && !matchCode && !matchRoom && !matchPhone) return false;
     }
 
-    // Status filter (Absent / Present / Late)
+    // 2. Floor filter
+    if (selectedFloor !== 'all') {
+      const floorNum = parseInt(selectedFloor, 10);
+      const studentFloor = s.floor_id !== undefined && s.floor_id !== null ? parseInt(String(s.floor_id), 10) : null;
+      if (studentFloor !== floorNum) {
+        // Fallback: check room number first digit if floor_id is unassigned
+        if (s.room_number) {
+          const roomStr = String(s.room_number).trim();
+          let calculatedFloor = -1;
+          if (roomStr.length >= 3) {
+            calculatedFloor = parseInt(roomStr.substring(0, roomStr.length - 2), 10);
+          }
+          if (calculatedFloor !== floorNum) return false;
+        } else {
+          return false;
+        }
+      }
+    }
+
+    // 3. Status filter (Absent / Present / Late / Leave)
     if (statusFilter !== 'all') {
-      const att = sessionAttendanceMap[sCode];
-      const currentStatus = att ? att.status.toLowerCase() : 'absent';
+      const att = getStudentAttendance(s);
+      const currentStatus = att && att.status ? att.status.toLowerCase() : 'absent';
+      
       if (statusFilter === 'absent' && currentStatus !== 'absent') return false;
-      if (statusFilter === 'present' && currentStatus !== 'present' && currentStatus !== 'late') return false;
+      if (statusFilter === 'present' && currentStatus !== 'present') return false;
       if (statusFilter === 'late' && currentStatus !== 'late') return false;
+      if (statusFilter === 'leave' && currentStatus !== 'leave') return false;
     }
 
     return true;
@@ -701,10 +759,10 @@ export const WhatsAppMessagingView: React.FC = () => {
               </select>
             </div>
 
-            {/* 4. Status Filter: Absent / Present / Late */}
+            {/* 4. Status Filter: Absent / Present / Late / Leave */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
-                ⚡ Status Filter
+                ⚡ Status Filter {attendanceLoading && <span style={{ fontSize: '10px', color: '#6366f1' }}>⏳</span>}
               </label>
               <select
                 value={statusFilter}
@@ -716,18 +774,19 @@ export const WhatsAppMessagingView: React.FC = () => {
                   border: '1px solid #cbd5e1',
                   fontSize: '13px',
                   fontWeight: 700,
-                  color: statusFilter === 'absent' ? '#dc2626' : (statusFilter === 'present' ? '#16a34a' : '#0f172a'),
+                  color: statusFilter === 'absent' ? '#dc2626' : (statusFilter === 'present' ? '#16a34a' : (statusFilter === 'leave' ? '#2563eb' : (statusFilter === 'late' ? '#d97706' : '#0f172a'))),
                   backgroundColor: '#ffffff'
                 }}
               >
-                <option value="all">All (Present & Absent)</option>
+                <option value="all">All (Present, Late, Absent & Leave)</option>
                 <option value="absent">🔴 Absent Only</option>
                 <option value="present">🟢 Present Only</option>
                 <option value="late">🟡 Late Only</option>
+                <option value="leave">🏖️ Leave Only</option>
               </select>
             </div>
 
-            {/* 5. Search by Name / ID / Room */}
+            {/* 5. Search by Name / ID / Room / Phone */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 🔍 Search Student
@@ -736,7 +795,7 @@ export const WhatsAppMessagingView: React.FC = () => {
                 <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                 <input
                   type="text"
-                  placeholder="Name, ID, Room..."
+                  placeholder="Name, ID, Room, Mobile..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   style={{
@@ -772,17 +831,40 @@ export const WhatsAppMessagingView: React.FC = () => {
               {filteredStudents.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
-                    No students match the selected filters.
+                    {attendanceLoading ? 'Loading session attendance records...' : 'No students match the selected filters.'}
                   </td>
                 </tr>
               ) : (
                 filteredStudents.map(s => {
                   const sCode = String(s.student_code || s.id);
                   const isSelected = selectedStudentIds.has(sCode);
-                  const att = sessionAttendanceMap[sCode];
-                  const currentStatus = att ? att.status : 'Absent';
-                  const isPresent = currentStatus === 'Present';
-                  const isLate = currentStatus === 'Late';
+                  const att = getStudentAttendance(s);
+                  const currentStatus = att ? (att.status || 'Absent') : 'Absent';
+                  const isPresent = currentStatus.toLowerCase() === 'present';
+                  const isLate = currentStatus.toLowerCase() === 'late';
+                  const isLeave = currentStatus.toLowerCase() === 'leave';
+
+                  let badgeBg = '#fef2f2';
+                  let badgeColor = '#991b1b';
+                  let badgeBorder = '#fecaca';
+                  let badgeLabel = '🔴 Absent';
+
+                  if (isPresent) {
+                    badgeBg = '#ecfdf5';
+                    badgeColor = '#065f46';
+                    badgeBorder = '#a7f3d0';
+                    badgeLabel = '🟢 Present';
+                  } else if (isLate) {
+                    badgeBg = '#fffbeb';
+                    badgeColor = '#b45309';
+                    badgeBorder = '#fde68a';
+                    badgeLabel = '🟡 Late';
+                  } else if (isLeave) {
+                    badgeBg = '#eff6ff';
+                    badgeColor = '#1d4ed8';
+                    badgeBorder = '#bfdbfe';
+                    badgeLabel = '🏖️ Leave';
+                  }
 
                   return (
                     <tr 
@@ -821,11 +903,11 @@ export const WhatsAppMessagingView: React.FC = () => {
                           borderRadius: '12px',
                           fontSize: '11px',
                           fontWeight: 800,
-                          backgroundColor: isPresent ? '#ecfdf5' : (isLate ? '#fffbeb' : '#fef2f2'),
-                          color: isPresent ? '#065f46' : (isLate ? '#b45309' : '#991b1b'),
-                          border: `1px solid ${isPresent ? '#a7f3d0' : (isLate ? '#fde68a' : '#fecaca')}`
-                        }}>
-                          {isPresent ? '🟢 Present' : (isLate ? '🟡 Late' : '🔴 Absent')}
+                          backgroundColor: badgeBg,
+                          color: badgeColor,
+                          border: `1px solid ${badgeBorder}`
+                        }} title={att?.reason || undefined}>
+                          {badgeLabel}
                         </span>
                       </td>
                       <td style={{ padding: '12px 14px', color: '#475569' }}>
