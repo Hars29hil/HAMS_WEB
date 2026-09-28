@@ -1,5 +1,63 @@
 const pool = require('../config/db');
 
+let tablesEnsured = false;
+async function ensureTablesExist() {
+  if (tablesEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS device_ip_bindings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(50) NOT NULL,
+        student_id INT NOT NULL,
+        student_code VARCHAR(50) NOT NULL,
+        student_name VARCHAR(100) NOT NULL,
+        device_uuid VARCHAR(100) DEFAULT NULL,
+        last_login_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        is_locked BOOLEAN DEFAULT FALSE,
+        is_whitelisted BOOLEAN DEFAULT FALSE,
+        INDEX (student_id),
+        INDEX (student_code),
+        INDEX (ip_address),
+        INDEX (device_uuid)
+      )
+    `);
+    try { await pool.query('ALTER TABLE device_ip_bindings ADD COLUMN is_whitelisted BOOLEAN DEFAULT FALSE'); } catch(e) {}
+    try { await pool.query('ALTER TABLE device_ip_bindings ADD COLUMN is_locked BOOLEAN DEFAULT FALSE'); } catch(e) {}
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS device_ip_security_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(50) NOT NULL,
+        device_uuid VARCHAR(100) DEFAULT NULL,
+        primary_student_id INT NOT NULL,
+        primary_student_code VARCHAR(50) NOT NULL,
+        primary_student_name VARCHAR(100) NOT NULL,
+        attempted_student_id INT NOT NULL,
+        attempted_student_code VARCHAR(50) NOT NULL,
+        attempted_student_name VARCHAR(100) NOT NULL,
+        event_type VARCHAR(50) DEFAULT 'CROSS_ACCOUNT_BLOCKED',
+        status VARCHAR(30) DEFAULT 'BLOCKED',
+        resolved_by VARCHAR(50) DEFAULT NULL,
+        resolved_at DATETIME DEFAULT NULL,
+        details TEXT DEFAULT NULL,
+        attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX (attempted_student_id),
+        INDEX (primary_student_id),
+        INDEX (ip_address),
+        INDEX (device_uuid)
+      )
+    `);
+
+    try { await pool.query('ALTER TABLE students ADD COLUMN last_known_ip VARCHAR(50) DEFAULT NULL'); } catch(e) {}
+    try { await pool.query('ALTER TABLE students ADD COLUMN last_login_at DATETIME DEFAULT NULL'); } catch(e) {}
+    try { await pool.query('ALTER TABLE students ADD COLUMN is_device_bound BOOLEAN DEFAULT FALSE'); } catch(e) {}
+
+    tablesEnsured = true;
+  } catch (err) {
+    console.warn('[DeviceSecurity Init Warning]', err.message);
+  }
+}
+
 /**
  * Extracts normalized client IP address from express request
  */
@@ -35,6 +93,7 @@ function getClientIp(req) {
  * 3. Safely accommodates shared hostel Wi-Fi networks (NAT) while tracking real client IPs.
  */
 async function checkAndBindDeviceIp(req, student, deviceUuid = null) {
+  await ensureTablesExist();
   try {
     const clientIp = getClientIp(req);
     const studentId = student.id;
@@ -45,6 +104,8 @@ async function checkAndBindDeviceIp(req, student, deviceUuid = null) {
     const cleanDeviceUuid = (deviceUuid && String(deviceUuid).trim() !== '' && String(deviceUuid).trim() !== 'NA') 
       ? String(deviceUuid).trim() 
       : null;
+
+    console.log(`[DeviceSecurity] Binding IP (${clientIp}) & Device (${cleanDeviceUuid || 'NONE'}) for student ${studentName} (${studentCode}, ID: ${studentId})`);
 
     // -------------------------------------------------------------
     // CHECK 1: Is this student ID already assigned to another phone/device?
@@ -205,25 +266,46 @@ async function checkAndBindDeviceIp(req, student, deviceUuid = null) {
     // -------------------------------------------------------------
     // 4. No conflict or authorized -> Upsert binding & update student table
     // -------------------------------------------------------------
-    await pool.query(
-      `INSERT INTO device_ip_bindings (ip_address, student_id, student_code, student_name, device_uuid, last_login_at)
-       VALUES (?, ?, ?, ?, ?, NOW())
-       ON DUPLICATE KEY UPDATE 
-         student_code = VALUES(student_code),
-         student_name = VALUES(student_name),
-         ip_address = VALUES(ip_address),
-         device_uuid = COALESCE(VALUES(device_uuid), device_uuid),
-         last_login_at = NOW()`,
-      [clientIp, studentId, studentCode, studentName, cleanDeviceUuid]
-    );
-
-    if (cleanDeviceUuid) {
-      await pool.query(
-        'UPDATE students SET device_uuid = ? WHERE id = ?',
-        [cleanDeviceUuid, studentId]
+    try {
+      const [existingRow] = await pool.query(
+        'SELECT id FROM device_ip_bindings WHERE student_id = ? OR student_code = ? LIMIT 1',
+        [studentId, studentCode]
       );
+      if (existingRow.length > 0) {
+        await pool.query(
+          `UPDATE device_ip_bindings 
+           SET student_id = ?, student_code = ?, student_name = ?, ip_address = ?, device_uuid = COALESCE(?, device_uuid), last_login_at = NOW() 
+           WHERE id = ?`,
+          [studentId, studentCode, studentName, clientIp, cleanDeviceUuid, existingRow[0].id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO device_ip_bindings (student_id, student_code, student_name, ip_address, device_uuid, last_login_at)
+           VALUES (?, ?, ?, ?, ?, NOW())`,
+          [studentId, studentCode, studentName, clientIp, cleanDeviceUuid]
+        );
+      }
+    } catch (insertErr) {
+      console.warn('[DeviceSecurity Upsert Warning]', insertErr.message);
     }
 
+    try {
+      await pool.query(
+        `UPDATE students SET 
+           last_known_ip = ?,
+           last_login_at = NOW(),
+           device_uuid = COALESCE(?, device_uuid),
+           is_device_bound = TRUE
+         WHERE id = ? OR student_code = ?`,
+        [clientIp, cleanDeviceUuid, studentId, studentCode]
+      );
+    } catch (sErr) {
+      try {
+        await pool.query('UPDATE students SET device_uuid = ? WHERE id = ?', [cleanDeviceUuid, studentId]);
+      } catch (e2) {}
+    }
+
+    console.log(`[DeviceSecurity] Successfully bound IP ${clientIp} for student ${studentName}`);
     return { allowed: true, ip_address: clientIp, device_uuid: cleanDeviceUuid };
 
   } catch (err) {
@@ -234,6 +316,7 @@ async function checkAndBindDeviceIp(req, student, deviceUuid = null) {
 
 module.exports = {
   getClientIp,
-  checkAndBindDeviceIp
+  checkAndBindDeviceIp,
+  ensureTablesExist
 };
 

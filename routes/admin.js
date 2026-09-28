@@ -1109,6 +1109,9 @@ router.get('/debug-reports', async (req, res) => {
 // GET /api/admin/security/device-logs
 router.get('/security/device-logs', async (req, res) => {
   try {
+    const { ensureTablesExist } = require('../services/deviceSecurity');
+    await ensureTablesExist();
+
     const [logs] = await pool.query(`
       SELECT 
         l.*,
@@ -1117,8 +1120,8 @@ router.get('/security/device-logs', async (req, res) => {
         s2.room_number AS attempted_room,
         s2.phone_number AS attempted_phone
       FROM device_ip_security_logs l
-      LEFT JOIN students s1 ON l.primary_student_id = s1.id
-      LEFT JOIN students s2 ON l.attempted_student_id = s2.id
+      LEFT JOIN students s1 ON (l.primary_student_id = s1.id OR TRIM(LEADING '0' FROM l.primary_student_code) = TRIM(LEADING '0' FROM s1.student_code))
+      LEFT JOIN students s2 ON (l.attempted_student_id = s2.id OR TRIM(LEADING '0' FROM l.attempted_student_code) = TRIM(LEADING '0' FROM s2.student_code))
       ORDER BY l.attempted_at DESC
       LIMIT 100
     `);
@@ -1126,10 +1129,10 @@ router.get('/security/device-logs', async (req, res) => {
     const [bindings] = await pool.query(`
       SELECT 
         b.*,
-        s.room_number,
-        s.phone_number
+        COALESCE(s.room_number, '') AS room_number,
+        COALESCE(s.phone_number, '') AS phone_number
       FROM device_ip_bindings b
-      LEFT JOIN students s ON b.student_id = s.id
+      LEFT JOIN students s ON (b.student_id = s.id OR TRIM(LEADING '0' FROM b.student_code) = TRIM(LEADING '0' FROM s.student_code))
       ORDER BY b.last_login_at DESC
       LIMIT 100
     `);

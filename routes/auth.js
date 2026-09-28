@@ -586,6 +586,10 @@ router.post('/auto-login', async (req, res) => {
       return res.status(404).json({ success: false, message: 'No matching student found' });
     }
 
+    // Check IP & Device binding
+    const clientDeviceUuid = req.body.device_uuid || req.headers['x-device-uuid'] || null;
+    await checkAndBindDeviceIp(req, matchedStudent, clientDeviceUuid);
+
     const token = jwt.sign(
       { id: matchedStudent.id, student_code: matchedStudent.student_code, floor_id: matchedStudent.floor_id, role: 'student' },
       process.env.JWT_SECRET,

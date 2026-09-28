@@ -114,6 +114,16 @@ router.get('/my-status', verifyStudent, async (req, res) => {
     const studentId = req.student.id;
     const floorId = req.student.floor_id || 0; // Default to 0 if undefined to prevent mysql2 crash
 
+    // Keep student IP and active binding updated in background
+    try {
+      const { getClientIp } = require('../services/deviceSecurity');
+      const clientIp = getClientIp(req);
+      if (clientIp && studentId) {
+        pool.query('UPDATE students SET last_known_ip = ?, last_login_at = NOW() WHERE id = ?', [clientIp, studentId]).catch(()=>{});
+        pool.query('UPDATE device_ip_bindings SET ip_address = ?, last_login_at = NOW() WHERE student_id = ?', [clientIp, studentId]).catch(()=>{});
+      }
+    } catch (ipErr) {}
+
     // Fetch all schedules from dynamic table
     const [scheduleRows] = await pool.query(
       'SELECT session_key, session_name, icon_name, start_time, end_time, is_for_all_students FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC'
