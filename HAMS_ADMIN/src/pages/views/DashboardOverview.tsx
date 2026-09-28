@@ -24,6 +24,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
 import { renderSessionIcon } from '../../utils/sessionIcons';
+import { ExpandableReasonTooltip } from '../../components/ExpandableReasonTooltip';
 
 export const DashboardOverview: React.FC = () => {
   const todayStr = new Date().toLocaleDateString('en-CA');
@@ -976,7 +977,7 @@ export const DashboardOverview: React.FC = () => {
                   </td>
                   <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                     {s.is_justified ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <span style={{
                           padding: '4px 10px',
                           borderRadius: '12px',
@@ -994,9 +995,11 @@ export const DashboardOverview: React.FC = () => {
                           <CheckCircle2 size={13} /> Justified
                         </span>
                         {s.justification_reason && (
-                          <span style={{ fontSize: '11px', color: '#059669', fontStyle: 'italic', maxWidth: '200px', whiteSpace: 'normal' }}>
-                            {s.justification_reason}
-                          </span>
+                          <ExpandableReasonTooltip
+                            text={s.justification_reason}
+                            maxLength={35}
+                            color="#059669"
+                          />
                         )}
                       </div>
                     ) : (

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
+import { ExpandableReasonTooltip } from '../../components/ExpandableReasonTooltip';
 import './LiveAttendanceManager.css';
 
 interface ManualModalState {
@@ -1323,8 +1324,12 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                       {s.status === 'Leave' ? '🏖️ Leave' : s.status}
                     </span>
                   </td>
-                  <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '13px', maxWidth: '200px' }}>
-                    {s.remarks || s.reason || '—'}
+                  <td style={{ padding: '12px 14px', maxWidth: '240px' }}>
+                    <ExpandableReasonTooltip
+                      text={s.remarks || s.reason || ''}
+                      maxLength={38}
+                      color="#475569"
+                    />
                   </td>
                   <td style={{ padding: '12px 14px', textAlign: 'right' }}>
                     <button
@@ -1449,13 +1454,16 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                   <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '13px' }}>
                     Floor {s.floor_id} {s.room_number ? `(Rm ${s.room_number})` : ''}
                   </td>
-                  <td style={{ padding: '12px 14px', color: s.reason ? '#0f172a' : '#94a3b8' }}>
+                  <td style={{ padding: '12px 14px', maxWidth: '240px' }}>
                     {s.reason ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#047857', fontWeight: 600 }}>
-                        <Check size={14} /> {s.reason}
-                      </span>
+                      <ExpandableReasonTooltip
+                        text={s.reason}
+                        maxLength={35}
+                        color="#047857"
+                        prefixBadge={<Check size={14} color="#047857" />}
+                      />
                     ) : (
-                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unjustified</span>
+                      <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>Unjustified</span>
                     )}
                   </td>
                   <td style={{ padding: '12px 14px', textAlign: 'right' }}>

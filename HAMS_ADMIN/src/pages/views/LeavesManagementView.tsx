@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
+import { ExpandableReasonTooltip } from '../../components/ExpandableReasonTooltip';
 
 export const LeavesManagementView: React.FC = () => {
   const [leaves, setLeaves] = useState<any[]>([]);
@@ -468,19 +469,13 @@ export const LeavesManagementView: React.FC = () => {
                         </span>
                       </div>
                     </td>
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{
-                        padding: '4px 10px',
-                        borderRadius: '8px',
-                        backgroundColor: '#f1f5f9',
-                        color: '#334155',
-                        border: '1px solid #cbd5e1',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        display: 'inline-block'
-                      }}>
-                        {l.reason || 'Approved Leave'}
-                      </span>
+                    <td style={{ padding: '12px 14px', maxWidth: '240px' }}>
+                      <ExpandableReasonTooltip
+                        text={l.reason || 'Approved Leave'}
+                        maxLength={35}
+                        badgeStyle={true}
+                        color="#334155"
+                      />
                     </td>
                     <td style={{ padding: '12px 14px', fontSize: '13px' }}>
                       {l.phone ? (
