@@ -142,3 +142,35 @@ button {
     transform: translateY(0) scale(1);
   }
 }
+
+/* Responsive View Layouts */
+.admin-view-content-wrapper {
+  flex: 1;
+  padding: 24px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.dashboard-content-wrapper {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.table-responsive-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+  .admin-view-content-wrapper {
+    padding: 12px 10px;
+  }
+
+  .dashboard-content-wrapper {
+    padding: 12px 6px;
+    gap: 16px;
+  }
+}

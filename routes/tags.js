@@ -5,12 +5,34 @@ const { verifyAdmin, verifyAdminOrFloorLeader } = require('../middleware/auth');
 
 router.use(verifyAdminOrFloorLeader);
 
+async function ensureDefaultTagsExist() {
+  try {
+    const defaultTags = [
+      { name: 'Parent Control', color: '#8b5cf6', description: 'Permits student to log in via Chrome browser' },
+      { name: 'iPhone', color: '#0284c7', description: 'Student logged in from an iPhone device' }
+    ];
+
+    for (const tag of defaultTags) {
+      const [rows] = await pool.query("SELECT id FROM student_tags WHERE LOWER(name) = LOWER(?)", [tag.name]);
+      if (rows.length === 0) {
+        await pool.query(
+          "INSERT INTO student_tags (name, color, is_system, description) VALUES (?, ?, TRUE, ?)",
+          [tag.name, tag.color, tag.description]
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[ensureDefaultTagsExist Warning]', err.message);
+  }
+}
+
 // ------------------------------------------------------------
 // GET /api/tags
 // Fetch all tags (system & custom) + student assignment counts
 // ------------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
+    await ensureDefaultTagsExist();
     const [tags] = await pool.query(`
       SELECT t.*, COUNT(sta.student_id) AS student_count
       FROM student_tags t

@@ -29,7 +29,7 @@ export const LeavesManagementView: React.FC = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [floorFilter, setFloorFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active_today' | 'approved'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active_today' | 'future' | 'past'>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -52,7 +52,9 @@ export const LeavesManagementView: React.FC = () => {
       let url = '/leaves?';
       const params: string[] = [];
       if (floorFilter !== 'All') params.push(`floor_id=${floorFilter}`);
-      if (statusFilter === 'active_today') params.push('active_only=true');
+      if (statusFilter === 'active_today') params.push('timing_status=active');
+      if (statusFilter === 'future') params.push('timing_status=future');
+      if (statusFilter === 'past') params.push('timing_status=past');
       if (startDate) params.push(`startDate=${startDate}`);
       if (endDate) params.push(`endDate=${endDate}`);
       if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
@@ -136,6 +138,16 @@ export const LeavesManagementView: React.FC = () => {
     return now >= s && now <= e;
   };
 
+  const getLeaveTimingStatus = (startStr: string, endStr: string): 'active' | 'future' | 'past' => {
+    if (!startStr || !endStr) return 'past';
+    const now = new Date().getTime();
+    const s = new Date(startStr).getTime();
+    const e = new Date(endStr).getTime();
+    if (now >= s && now <= e) return 'active';
+    if (now < s) return 'future';
+    return 'past';
+  };
+
   const filteredLeaves = leaves.filter(l => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -146,6 +158,32 @@ export const LeavesManagementView: React.FC = () => {
       String(l.phone || '').toLowerCase().includes(q) ||
       String(l.reason || '').toLowerCase().includes(q)
     );
+  });
+
+  const sortedLeaves = [...filteredLeaves].sort((a, b) => {
+    const statusA = getLeaveTimingStatus(a.start_time, a.end_time);
+    const statusB = getLeaveTimingStatus(b.start_time, b.end_time);
+
+    const priority = { active: 1, future: 2, past: 3 };
+    const pA = priority[statusA] || 3;
+    const pB = priority[statusB] || 3;
+
+    if (pA !== pB) return pA - pB;
+
+    const timeA_start = new Date(a.start_time).getTime();
+    const timeB_start = new Date(b.start_time).getTime();
+
+    if (statusA === 'active') {
+      const timeA_end = new Date(a.end_time).getTime();
+      const timeB_end = new Date(b.end_time).getTime();
+      return timeA_end - timeB_end;
+    }
+
+    if (statusA === 'future') {
+      return timeA_start - timeB_start;
+    }
+
+    return timeB_start - timeA_start;
   });
 
   return (
@@ -342,7 +380,8 @@ export const LeavesManagementView: React.FC = () => {
             >
               <option value="all">All Leave Records</option>
               <option value="active_today">Active Leaves Today</option>
-              <option value="approved">Approved Leaves</option>
+              <option value="future">Future Leaves (Upcoming)</option>
+              <option value="past">Past Leaves (Completed)</option>
             </select>
 
             <select
@@ -472,7 +511,7 @@ export const LeavesManagementView: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredLeaves.map((l, idx) => {
+              {sortedLeaves.map((l, idx) => {
                 const activeNow = isCurrentlyActive(l.start_time, l.end_time);
                 return (
                   <tr key={l.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -517,43 +556,79 @@ export const LeavesManagementView: React.FC = () => {
                       )}
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {activeNow ? (
-                        <span style={{
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          backgroundColor: '#ecfdf5',
-                          color: '#065f46',
-                          border: '1px solid #a7f3d0',
-                          fontSize: '12px',
-                          fontWeight: 800,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => setInfoModalOpen(true)}
-                        title="Click to view status explanation"
-                        >
-                          <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-                          Active Today
-                        </span>
-                      ) : (
-                        <span style={{
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          backgroundColor: '#ede9fe',
-                          color: '#6d28d9',
-                          border: '1px solid #ddd6fe',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => setInfoModalOpen(true)}
-                        title="Click to view status explanation"
-                        >
-                          Approved
-                        </span>
-                      )}
+                      {(() => {
+                        const timing = getLeaveTimingStatus(l.start_time, l.end_time);
+                        if (timing === 'active') {
+                          return (
+                            <span
+                              style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                backgroundColor: '#ecfdf5',
+                                color: '#065f46',
+                                border: '1px solid #a7f3d0',
+                                fontSize: '12px',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => setInfoModalOpen(true)}
+                              title="Active today - Click to view status explanation"
+                            >
+                              <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
+                              Active Today
+                            </span>
+                          );
+                        }
+                        if (timing === 'future') {
+                          return (
+                            <span
+                              style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                backgroundColor: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => setInfoModalOpen(true)}
+                              title="Upcoming future leave - Click to view status explanation"
+                            >
+                              <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#3b82f6' }}></span>
+                              Future Leave
+                            </span>
+                          );
+                        }
+                        return (
+                          <span
+                            style={{
+                              padding: '4px 12px',
+                              borderRadius: '12px',
+                              backgroundColor: '#f1f5f9',
+                              color: '#475569',
+                              border: '1px solid #cbd5e1',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => setInfoModalOpen(true)}
+                            title="Completed past leave - Click to view status explanation"
+                          >
+                            <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#94a3b8' }}></span>
+                            Past Leave
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -588,7 +663,7 @@ export const LeavesManagementView: React.FC = () => {
             backgroundColor: '#ffffff',
             borderRadius: '20px',
             padding: '28px',
-            maxWidth: '500px',
+            maxWidth: '520px',
             width: '100%',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
             border: '1px solid #e2e8f0'
@@ -600,7 +675,7 @@ export const LeavesManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>Leave Status Guide</h3>
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>What "Active Today" & "Approved" Mean</span>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>Understanding Active, Future & Past Leave Statuses</span>
                 </div>
               </div>
               <button onClick={() => setInfoModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>
@@ -622,16 +697,29 @@ export const LeavesManagementView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Approved */}
-              <div style={{ padding: '16px', borderRadius: '14px', backgroundColor: '#f5f3ff', border: '1.5px solid #ddd6fe' }}>
+              {/* Future Leave */}
+              <div style={{ padding: '16px', borderRadius: '14px', backgroundColor: '#eff6ff', border: '1.5px solid #bfdbfe' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span style={{ padding: '4px 10px', borderRadius: '12px', backgroundColor: '#8b5cf6', color: '#ffffff', fontSize: '12px', fontWeight: 800 }}>
-                    Approved
+                  <span style={{ padding: '4px 10px', borderRadius: '12px', backgroundColor: '#3b82f6', color: '#ffffff', fontSize: '12px', fontWeight: 800 }}>
+                    ● Future Leave
                   </span>
-                  <strong style={{ fontSize: '14px', color: '#5b21b6' }}>Past or Scheduled Leave Record</strong>
+                  <strong style={{ fontSize: '14px', color: '#1e40af' }}>Upcoming Scheduled Leave</strong>
                 </div>
-                <p style={{ margin: 0, fontSize: '13px', color: '#6d28d9', lineHeight: '1.5' }}>
-                  The student has a verified leave recorded in the system for past completed dates or upcoming future dates, but the leave is <strong>not active for today</strong>.
+                <p style={{ margin: 0, fontSize: '13px', color: '#1d4ed8', lineHeight: '1.5' }}>
+                  The student has an approved leave scheduled for upcoming future dates. It will <strong>automatically become active</strong> when the start date arrives.
+                </p>
+              </div>
+
+              {/* Past Leave */}
+              <div style={{ padding: '16px', borderRadius: '14px', backgroundColor: '#f8fafc', border: '1.5px solid #cbd5e1' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '12px', backgroundColor: '#64748b', color: '#ffffff', fontSize: '12px', fontWeight: 800 }}>
+                    ● Past Leave
+                  </span>
+                  <strong style={{ fontSize: '14px', color: '#334155' }}>Completed Past Leave Record</strong>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: '1.5' }}>
+                  The student's approved leave period has already ended and was completed in the past. It remains in the system for historical verification.
                 </p>
               </div>
             </div>

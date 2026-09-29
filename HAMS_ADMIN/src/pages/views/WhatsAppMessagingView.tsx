@@ -915,7 +915,7 @@ export const WhatsAppMessagingView: React.FC = () => {
                           backgroundColor: badgeBg,
                           color: badgeColor,
                           border: `1px solid ${badgeBorder}`
-                        }} title={att?.reason || undefined}>
+                        }} title={(att as any)?.reason || undefined}>
                           {badgeLabel}
                         </span>
                       </td>

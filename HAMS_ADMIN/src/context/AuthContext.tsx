@@ -6,6 +6,9 @@ interface AdminUser {
   role: string;
   name?: string;
   floor_id?: number;
+  assigned_floors?: number[];
+  assigned_sessions?: string[];
+  session_permissions?: Record<string, 'view' | 'edit'>;
 }
 
 interface AuthContextType {
@@ -13,6 +16,7 @@ interface AuthContextType {
   token: string | null;
   login: (code: string, password?: string) => Promise<boolean>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   loading: boolean;
 }
 
@@ -23,6 +27,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const refreshUser = async () => {
+    try {
+      const res = await apiClient.get('/auth/me');
+      if (res.data?.success && res.data.data) {
+        const u = res.data.data;
+        const userObj: AdminUser = {
+          id: u.id,
+          role: u.role || 'ADMIN',
+          name: u.name,
+          floor_id: u.floor_id,
+          assigned_floors: u.assigned_floors || [],
+          assigned_sessions: u.assigned_sessions || ['all'],
+          session_permissions: u.session_permissions || {}
+        };
+        setAdmin(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(userObj)) {
+            localStorage.setItem('admin_user', JSON.stringify(userObj));
+            return userObj;
+          }
+          return prev;
+        });
+      }
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        logout();
+      }
+    }
+  };
+
   useEffect(() => {
     const savedToken = localStorage.getItem('admin_token');
     const savedUser = localStorage.getItem('admin_user');
@@ -30,12 +63,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         setToken(savedToken);
         setAdmin(JSON.parse(savedUser));
+        refreshUser();
       } catch (e) {
         logout();
       }
     }
     setLoading(false);
   }, []);
+
+  // Real-time polling to sync permissions, assigned sessions, and assigned floors without requiring page refresh
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => {
+      refreshUser();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [token]);
 
   const login = async (code: string, password?: string): Promise<boolean> => {
     try {
@@ -51,6 +94,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             role: role,
             name: res.data.data.name || res.data.data.user?.name || 'Administrator',
             floor_id: res.data.data.floor_id || res.data.data.user?.floor_id,
+            assigned_floors: res.data.data.assigned_floors || res.data.data.user?.assigned_floors || [],
+            assigned_sessions: res.data.data.assigned_sessions || res.data.data.user?.assigned_sessions || ['all'],
+            session_permissions: res.data.data.session_permissions || res.data.data.user?.session_permissions || {},
           };
           const tok = res.data.data.token;
           setToken(tok);

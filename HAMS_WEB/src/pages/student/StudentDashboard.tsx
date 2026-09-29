@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, Phone, Mail, DoorClosed, CheckCircle, Fingerprint, Clock, RotateCw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { LogOut, Phone, Mail, DoorClosed, CheckCircle, Fingerprint, Clock, RotateCw, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../services/apiClient';
 import { connectToESP32 } from '../../services/bleService';
@@ -17,6 +18,15 @@ export const StudentDashboard: React.FC = () => {
   const [allSchedules, setAllSchedules] = useState<Array<{ session_key: string; session_name: string; start_time: string; end_time: string }>>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [unauthorizedModal, setUnauthorizedModal] = useState<{
+    show: boolean;
+    message: string;
+    countdown: number;
+  }>({
+    show: false,
+    message: '',
+    countdown: 3
+  });
 
   useEffect(() => {
     fetchStatus();
@@ -24,6 +34,25 @@ export const StudentDashboard: React.FC = () => {
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Handle auto-refresh and auto-logout timer when unauthorized
+  useEffect(() => {
+    if (!unauthorizedModal.show) return;
+    if (unauthorizedModal.countdown <= 0) {
+      logout();
+      window.location.href = '/login';
+      return;
+    }
+    const timer = setTimeout(() => {
+      setUnauthorizedModal(prev => ({ ...prev, countdown: prev.countdown - 1 }));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [unauthorizedModal.show, unauthorizedModal.countdown, logout]);
+
+  const handleForceLogout = () => {
+    logout();
+    window.location.href = '/login';
+  };
 
   const fetchStatus = async () => {
     setIsRefreshing(true);
@@ -109,6 +138,18 @@ export const StudentDashboard: React.FC = () => {
         throw new Error(res.data.message || 'Failed to mark attendance.');
       }
     } catch (err: any) {
+      const respData = err.response?.data;
+      if (
+        err.response?.status === 403 && 
+        (respData?.code === 'UNAUTHORIZED_DEVICE_OR_BROWSER' || respData?.message?.toLowerCase().includes('not authorized'))
+      ) {
+        setUnauthorizedModal({
+          show: true,
+          message: respData?.message || 'You are not authorized. Please login again.',
+          countdown: 3
+        });
+        return;
+      }
       setError(err.response?.data?.message || err.message || 'An unexpected error occurred during attendance marking.');
     } finally {
       setIsMarking(false);
@@ -190,13 +231,26 @@ export const StudentDashboard: React.FC = () => {
               <div style={{ fontWeight: 600, marginTop: '2px', marginBottom: '2px' }}>Schedules:</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                 {allSchedules.length > 0 ? (
-                  allSchedules.map((s) => {
-                    const startFormatted = formatTime12(s.start_time);
-                    const endFormatted = formatTime12(s.end_time);
+                  allSchedules.map((s: any) => {
+                    const isActiveToday = s.is_active_today !== false && s.start_time !== '00:00';
+                    const startFormatted = formatTime12(isActiveToday ? s.start_time : (s.base_start_time || s.start_time));
+                    const endFormatted = formatTime12(isActiveToday ? s.end_time : (s.base_end_time || s.end_time));
+                    const daysLabel = s.days_label && s.days_label !== 'Every day' ? s.days_label : null;
+
                     return (
                       <div key={s.session_key} style={{ fontSize: '0.85rem' }}>
                         <span style={{ fontWeight: 600 }}>{s.session_name}:</span>{' '}
-                        {startFormatted && endFormatted ? `${startFormatted} – ${endFormatted}` : (s.start_time && s.end_time && s.start_time !== '00:00' ? `${s.start_time} – ${s.end_time}` : 'Not Scheduled')}
+                        {isActiveToday ? (
+                          <span>
+                            {startFormatted} – {endFormatted}
+                            {daysLabel && <span style={{ opacity: 0.8, fontSize: '0.8rem', marginLeft: '6px' }}>({daysLabel})</span>}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'rgba(255,255,255,0.75)' }}>
+                            {daysLabel ? `${daysLabel} only` : 'Not Scheduled Today'}
+                            {startFormatted && endFormatted && ` (${startFormatted} – ${endFormatted})`}
+                          </span>
+                        )}
                       </div>
                     );
                   })
@@ -205,7 +259,7 @@ export const StudentDashboard: React.FC = () => {
                     <span style={{ fontWeight: 600 }}>{schedule.sessionName}:</span>{' '}
                     {formatTime12(schedule.start) && formatTime12(schedule.end)
                       ? `${formatTime12(schedule.start)} – ${formatTime12(schedule.end)}`
-                      : (schedule.start && schedule.end && schedule.start !== '00:00' ? `${schedule.start} – ${schedule.end}` : 'Not Scheduled')}
+                      : (schedule.start && schedule.end && schedule.start !== '00:00' ? `${schedule.start} – ${schedule.end}` : 'Not Scheduled Today')}
                   </div>
                 )}
               </div>
@@ -268,6 +322,90 @@ export const StudentDashboard: React.FC = () => {
           )}
         </HamsCard>
       </div>
+
+      {/* Unauthorized Device / Browser Modal */}
+      {unauthorizedModal.show && createPortal(
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.25rem',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '24px',
+            maxWidth: '420px',
+            width: '100%',
+            padding: '2rem',
+            textAlign: 'center',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #fee2e2'
+          }}>
+            <div style={{
+              width: '68px',
+              height: '68px',
+              borderRadius: '50%',
+              backgroundColor: '#fee2e2',
+              color: '#dc2626',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1.25rem'
+            }}>
+              <AlertTriangle size={36} />
+            </div>
+
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#991b1b', marginBottom: '0.6rem' }}>
+              Access Unauthorized
+            </h2>
+
+            <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+              {unauthorizedModal.message || 'You are not authorized. Please login again.'}
+            </p>
+
+            <div style={{
+              backgroundColor: '#fef2f2',
+              borderRadius: '12px',
+              padding: '0.75rem',
+              marginBottom: '1.5rem',
+              border: '1px solid #fecaca',
+              fontSize: '0.85rem',
+              color: '#b91c1c',
+              fontWeight: 600
+            }}>
+              Auto-refreshing & logging out in <span style={{ fontWeight: 800, fontSize: '1.05rem' }}>{unauthorizedModal.countdown}s</span>...
+            </div>
+
+            <button
+              onClick={handleForceLogout}
+              style={{
+                width: '100%',
+                padding: '0.85rem',
+                borderRadius: '12px',
+                backgroundColor: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(220, 38, 38, 0.35)'
+              }}
+            >
+              Re-login Now
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

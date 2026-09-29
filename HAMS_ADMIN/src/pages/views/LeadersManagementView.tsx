@@ -16,7 +16,11 @@ import {
   Eye,
   EyeOff,
   Phone,
-  Check
+  Check,
+  MessageSquare,
+  Palmtree,
+  ShieldAlert,
+  RotateCcw
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
@@ -34,7 +38,9 @@ interface Leader {
   phone_number?: string;
   assigned_floors: number[];
   assigned_sessions?: string[];
+  session_permissions?: Record<string, 'view' | 'edit'>;
   floor_details: FloorDetail[];
+  session_details?: { session_key: string; session_name: string; mode: 'view' | 'edit' }[];
   total_students: number;
   is_active: boolean;
   created_at: string;
@@ -44,6 +50,7 @@ export const LeadersManagementView: React.FC = () => {
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [floors, setFloors] = useState<any[]>([]);
   const [availableSessions, setAvailableSessions] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,8 +65,10 @@ export const LeadersManagementView: React.FC = () => {
   const [formPhone, setFormPhone] = useState('');
   const [formFloors, setFormFloors] = useState<number[]>([]);
   const [formSessions, setFormSessions] = useState<string[]>(['all']);
+  const [formPermissions, setFormPermissions] = useState<Record<string, 'view' | 'edit'>>({ all: 'edit' });
   const [formActive, setFormActive] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+  const [showNameSuggestions, setShowNameSuggestions] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
 
@@ -77,10 +86,11 @@ export const LeadersManagementView: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [leadersRes, floorsRes, sessionsRes] = await Promise.all([
+      const [leadersRes, floorsRes, sessionsRes, studentsRes] = await Promise.all([
         apiClient.get('/leaders').catch(() => ({ data: { success: true, data: [] } })),
         apiClient.get('/floors').catch(() => ({ data: { success: true, data: [] } })),
-        apiClient.get('/admin/sessions').catch(() => ({ data: { success: true, data: [] } }))
+        apiClient.get('/admin/sessions').catch(() => ({ data: { success: true, data: [] } })),
+        apiClient.get('/students').catch(() => ({ data: { success: true, data: [] } }))
       ]);
 
       if (leadersRes.data.success) {
@@ -91,6 +101,9 @@ export const LeadersManagementView: React.FC = () => {
       }
       if (sessionsRes.data.success) {
         setAvailableSessions(sessionsRes.data.data);
+      }
+      if (studentsRes.data.success) {
+        setStudents(studentsRes.data.data || []);
       }
     } catch (err) {
       console.error('Failed to load leaders data', err);
@@ -113,8 +126,16 @@ export const LeadersManagementView: React.FC = () => {
     setFormPhone('');
     setFormFloors([]);
     setFormSessions(['all']);
+    setFormPermissions({
+      all: 'edit',
+      can_access_whatsapp: false,
+      can_access_leaves: false,
+      can_access_security: false,
+      can_reset_ip: false
+    });
     setFormActive(true);
     setShowPassword(false);
+    setShowNameSuggestions(false);
     setModalError('');
     setModalOpen(true);
   };
@@ -127,10 +148,37 @@ export const LeadersManagementView: React.FC = () => {
     setFormPhone(leader.phone_number || '');
     setFormFloors(leader.assigned_floors || []);
     setFormSessions(leader.assigned_sessions && leader.assigned_sessions.length > 0 ? leader.assigned_sessions : ['all']);
+    const rawPerms = (leader.session_permissions && Object.keys(leader.session_permissions).length > 0) ? leader.session_permissions : {};
+    setFormPermissions({
+      all: 'edit',
+      ...rawPerms,
+      can_access_whatsapp: Boolean((rawPerms as any).can_access_whatsapp),
+      can_access_leaves: Boolean((rawPerms as any).can_access_leaves),
+      can_access_security: Boolean((rawPerms as any).can_access_security),
+      can_reset_ip: Boolean((rawPerms as any).can_reset_ip),
+    });
     setFormActive(leader.is_active);
     setShowPassword(false);
+    setShowNameSuggestions(false);
     setModalError('');
     setModalOpen(true);
+  };
+
+  const setSessionMode = (sessionKey: string, mode: 'view' | 'edit') => {
+    setFormPermissions(prev => ({
+      ...prev,
+      [sessionKey]: mode
+    }));
+  };
+
+  const handleSelectStudentSuggestion = (student: any) => {
+    setFormName(student.name || '');
+    setFormUsername(student.student_code ? String(student.student_code) : '');
+    setFormPhone(student.phone_number || student.assigned_mobile || '');
+    if (student.floor_id !== undefined && student.floor_id !== null && !isNaN(Number(student.floor_id))) {
+      setFormFloors([Number(student.floor_id)]);
+    }
+    setShowNameSuggestions(false);
   };
 
   const toggleFloorSelection = (floorId: number) => {
@@ -207,6 +255,7 @@ export const LeadersManagementView: React.FC = () => {
           username: formUsername.trim(),
           assigned_floors: formFloors,
           assigned_sessions: formSessions,
+          session_permissions: formPermissions,
           phone_number: formPhone.trim() || null,
           is_active: formActive
         };
@@ -229,6 +278,7 @@ export const LeadersManagementView: React.FC = () => {
           password: formPassword.trim(),
           assigned_floors: formFloors,
           assigned_sessions: formSessions,
+          session_permissions: formPermissions,
           phone_number: formPhone.trim() || null
         });
 
@@ -289,7 +339,7 @@ export const LeadersManagementView: React.FC = () => {
         <HamsCard padding="20px">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Floor Leaders</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total User Credentials</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: '#0f172a', marginTop: '6px' }}>{leaders.length}</div>
             </div>
             <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
@@ -301,7 +351,7 @@ export const LeadersManagementView: React.FC = () => {
         <HamsCard padding="20px">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Leaders</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active User Credentials</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: '#10b981', marginTop: '6px' }}>
                 {leaders.filter(l => l.is_active).length}
               </div>
@@ -348,7 +398,7 @@ export const LeadersManagementView: React.FC = () => {
               <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
               <input
                 type="text"
-                placeholder="Search leaders by name, username ID, phone..."
+                placeholder="Search user credentials by name, username ID, phone..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -434,7 +484,7 @@ export const LeadersManagementView: React.FC = () => {
               }}
             >
               <Plus size={18} />
-              <span>+ Create New Leader</span>
+              <span>+ Create User Credential</span>
             </button>
           </div>
         </div>
@@ -444,17 +494,17 @@ export const LeadersManagementView: React.FC = () => {
       {loading ? (
         <div style={{ padding: '60px', textAlign: 'center', color: '#64748b' }}>
           <RefreshCw size={32} className="animate-spin" style={{ margin: '0 auto 12px auto', color: '#4f46e5' }} />
-          <div style={{ fontSize: '16px', fontWeight: 600 }}>Loading Floor Leaders...</div>
+          <div style={{ fontSize: '16px', fontWeight: 600 }}>Loading User Credentials...</div>
         </div>
       ) : filteredLeaders.length === 0 ? (
         <HamsCard padding="48px">
           <div style={{ textAlign: 'center', color: '#64748b' }}>
             <ShieldCheck size={48} style={{ color: '#cbd5e1', margin: '0 auto 12px auto' }} />
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b', margin: '0 0 6px 0' }}>
-              {searchQuery ? 'No matching floor leaders found' : 'No floor leaders created yet'}
+              {searchQuery ? 'No matching user credentials found' : 'No user credentials created yet'}
             </h3>
             <p style={{ fontSize: '14px', margin: '0 0 16px 0' }}>
-              {searchQuery ? 'Try adjusting your search criteria or floor filter.' : 'Create leaders to assign floor management, live attendance monitoring, and absentee tracking.'}
+              {searchQuery ? 'Try adjusting your search criteria or floor filter.' : 'Create user login credentials to assign floor management, live attendance monitoring, and absentee tracking.'}
             </p>
             {!searchQuery && (
               <button
@@ -469,7 +519,7 @@ export const LeadersManagementView: React.FC = () => {
                   cursor: 'pointer'
                 }}
               >
-                + Create First Floor Leader
+                + Create First User Credential
               </button>
             )}
           </div>
@@ -625,30 +675,38 @@ export const LeadersManagementView: React.FC = () => {
                   {/* Assigned Sessions Chips */}
                   <div style={{ marginTop: '12px' }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Assigned Sessions:
+                      Assigned Sessions & Permissions:
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {(!leader.assigned_sessions || leader.assigned_sessions.length === 0 || leader.assigned_sessions.includes('all')) ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            padding: '3px 8px',
-                            backgroundColor: '#f0fdf4',
-                            color: '#15803d',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '6px',
-                            fontSize: '11px',
-                            fontWeight: 700
-                          }}
-                        >
-                          🌟 All Sessions (Hostel-wide)
-                        </span>
+                        (() => {
+                          const mode = leader.session_permissions?.['all'] || 'edit';
+                          const isView = mode === 'view';
+                          return (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '3px 8px',
+                                backgroundColor: isView ? '#eff6ff' : '#f0fdf4',
+                                color: isView ? '#1d4ed8' : '#15803d',
+                                border: isView ? '1px solid #bfdbfe' : '1px solid #bbf7d0',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 700
+                              }}
+                            >
+                              🌟 All Sessions ({isView ? '👁️ View Only' : '✏️ Edit'})
+                            </span>
+                          );
+                        })()
                       ) : (
                         leader.assigned_sessions.map(sKey => {
                           const sessObj = availableSessions.find(s => s.session_key === sKey);
                           const name = sessObj ? sessObj.session_name : (sKey.charAt(0).toUpperCase() + sKey.slice(1));
+                          const mode = leader.session_permissions?.[sKey] || leader.session_permissions?.['all'] || 'edit';
+                          const isView = mode === 'view';
                           return (
                             <span
                               key={`leader_${leader.id}_sess_${sKey}`}
@@ -657,15 +715,15 @@ export const LeadersManagementView: React.FC = () => {
                                 alignItems: 'center',
                                 gap: '4px',
                                 padding: '3px 8px',
-                                backgroundColor: '#fef3c7',
-                                color: '#b45309',
-                                border: '1px solid #fde68a',
+                                backgroundColor: isView ? '#eff6ff' : '#fef3c7',
+                                color: isView ? '#1d4ed8' : '#b45309',
+                                border: isView ? '1px solid #bfdbfe' : '1px solid #fde68a',
                                 borderRadius: '6px',
                                 fontSize: '11px',
                                 fontWeight: 700
                               }}
                             >
-                              🎯 {name}
+                              🎯 {name} ({isView ? '👁️ View Only' : '✏️ Edit'})
                             </span>
                           );
                         })
@@ -746,10 +804,10 @@ export const LeadersManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>
-                    {editingLeader ? 'Edit Floor Leader' : 'Create New Floor Leader'}
+                    {editingLeader ? 'Edit User Credential' : 'Create New User Credential'}
                   </h3>
                   <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: '#64748b' }}>
-                    {editingLeader ? 'Update credentials and floor responsibilities' : 'Assign multiple floors and set login ID & password'}
+                    {editingLeader ? 'Update user credentials and floor responsibilities' : 'Assign multiple floors and set login ID & password'}
                   </p>
                 </div>
               </div>
@@ -786,16 +844,23 @@ export const LeadersManagementView: React.FC = () => {
                 </div>
               )}
 
-              {/* Full Name */}
-              <div>
+              {/* Full Name with Student Autocomplete Suggestions */}
+              <div style={{ position: 'relative' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
                   Leader Full Name <span style={{ color: '#ef4444' }}>*</span>
+                  <span style={{ fontSize: '12px', fontWeight: 400, color: '#64748b', marginLeft: '6px' }}>
+                    (Type student name or ID for instant auto-fill)
+                  </span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Rahul Sharma"
+                  placeholder="e.g. Rahul Sharma or student ID..."
                   value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
+                  onChange={(e) => {
+                    setFormName(e.target.value);
+                    setShowNameSuggestions(true);
+                  }}
+                  onFocus={() => setShowNameSuggestions(true)}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
@@ -807,6 +872,79 @@ export const LeadersManagementView: React.FC = () => {
                   }}
                   required
                 />
+
+                {/* Suggestions dropdown */}
+                {showNameSuggestions && formName.trim().length > 0 && (
+                  (() => {
+                    const matches = students.filter(s =>
+                      (s.name && s.name.toLowerCase().includes(formName.toLowerCase())) ||
+                      (s.student_code && String(s.student_code).toLowerCase().includes(formName.toLowerCase()))
+                    ).slice(0, 7);
+
+                    if (matches.length === 0) return null;
+
+                    return (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: '#ffffff',
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: '10px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+                        marginTop: '4px',
+                        maxHeight: '220px',
+                        overflowY: 'auto',
+                        zIndex: 1100
+                      }}>
+                        <div style={{ padding: '6px 12px', backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: '11px', fontWeight: 700, color: '#64748b' }}>
+                          💡 MATCHING ACTIVE STUDENTS (Click to Auto-fill ID, Phone & Floor):
+                        </div>
+                        {matches.map(s => (
+                          <div
+                            key={`s_sugg_${s.student_id || s.student_code}`}
+                            onClick={() => handleSelectStudentSuggestion(s)}
+                            style={{
+                              padding: '9px 14px',
+                              cursor: 'pointer',
+                              borderBottom: '1px solid #f1f5f9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'background-color 0.15s'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eef2ff'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                          >
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                                {s.name}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '8px', marginTop: '2px' }}>
+                                <span style={{ fontFamily: 'monospace', color: '#4f46e5', fontWeight: 600 }}>ID: {s.student_code}</span>
+                                <span>• Floor {s.floor_id !== undefined ? s.floor_id : 'N/A'} {s.room_number ? `(Rm ${s.room_number})` : ''}</span>
+                                {(s.phone_number || s.assigned_mobile) && (
+                                  <span>• 📞 {s.phone_number || s.assigned_mobile}</span>
+                                )}
+                              </div>
+                            </div>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              color: '#4f46e5',
+                              backgroundColor: '#eef2ff',
+                              padding: '3px 8px',
+                              borderRadius: '6px'
+                            }}>
+                              Select ↵
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
+                )}
               </div>
 
               {/* Login ID / Username & Phone */}
@@ -1022,12 +1160,12 @@ export const LeadersManagementView: React.FC = () => {
                       cursor: 'pointer'
                     }}
                   >
-                    All Sessions (Full Access)
+                    All Sessions (Hostel-wide)
                   </button>
                 </div>
 
                 <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 8px 0' }}>
-                  Choose which sessions this leader can see, manage live attendance for, and target students.
+                  Choose which sessions this user can see and access.
                 </p>
 
                 <div style={{
@@ -1090,6 +1228,303 @@ export const LeadersManagementView: React.FC = () => {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* SESSION PERMISSION MODE (VIEW ONLY VS EDIT) */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                    Access Permission Mode (View Only vs. Edit) <span style={{ color: '#ef4444' }}>*</span>
+                  </div>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                    Configure whether this leader can mark & edit attendance or strictly view records only for their assigned floors.
+                  </p>
+                </div>
+
+                {formSessions.includes('all') ? (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 12px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px'
+                  }}>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                      🌟 All Sessions Access:
+                    </span>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSessionMode('all', 'edit')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          border: (formPermissions['all'] || 'edit') === 'edit' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                          backgroundColor: (formPermissions['all'] || 'edit') === 'edit' ? '#eef2ff' : '#ffffff',
+                          color: (formPermissions['all'] || 'edit') === 'edit' ? '#4338ca' : '#64748b',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSessionMode('all', 'view')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          border: formPermissions['all'] === 'view' ? '2px solid #3b82f6' : '1px solid #cbd5e1',
+                          backgroundColor: formPermissions['all'] === 'view' ? '#eff6ff' : '#ffffff',
+                          color: formPermissions['all'] === 'view' ? '#1d4ed8' : '#64748b',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        👁️ View Only
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {formSessions.map(sKey => {
+                      const sessObj = availableSessions.find(s => s.session_key === sKey);
+                      const sName = sessObj ? sessObj.session_name : (sKey.charAt(0).toUpperCase() + sKey.slice(1));
+                      const curMode = formPermissions[sKey] || formPermissions['all'] || 'edit';
+
+                      return (
+                        <div
+                          key={`perm_mode_${sKey}`}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            backgroundColor: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px'
+                          }}
+                        >
+                          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                            🎯 {sName}
+                          </span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setSessionMode(sKey, 'edit')}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: '8px',
+                                border: curMode === 'edit' ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                                backgroundColor: curMode === 'edit' ? '#eef2ff' : '#ffffff',
+                                color: curMode === 'edit' ? '#4338ca' : '#64748b',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSessionMode(sKey, 'view')}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: '8px',
+                                border: curMode === 'view' ? '2px solid #3b82f6' : '1px solid #cbd5e1',
+                                backgroundColor: curMode === 'view' ? '#eff6ff' : '#ffffff',
+                                color: curMode === 'view' ? '#1d4ed8' : '#64748b',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              👁️ View Only
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION ACCESS PERMISSIONS (WHATSAPP, LEAVES, PROXY SECURITY) */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                    Additional Operations & Menu Permissions
+                  </div>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                    Configure which optional management sections are visible in this leader's menu.
+                  </p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                  {/* WhatsApp Messaging */}
+                  <div
+                    onClick={() => setFormPermissions((prev: any) => ({ ...prev, can_access_whatsapp: !prev.can_access_whatsapp }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      backgroundColor: '#ffffff',
+                      border: (formPermissions as any).can_access_whatsapp ? '2px solid #22c55e' : '1px solid #e2e8f0',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MessageSquare size={16} color={(formPermissions as any).can_access_whatsapp ? '#16a34a' : '#64748b'} />
+                      <span style={{ fontSize: '12.5px', fontWeight: (formPermissions as any).can_access_whatsapp ? 700 : 600, color: (formPermissions as any).can_access_whatsapp ? '#15803d' : '#334155' }}>
+                        WhatsApp Messaging
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      backgroundColor: (formPermissions as any).can_access_whatsapp ? '#dcfce7' : '#f1f5f9',
+                      color: (formPermissions as any).can_access_whatsapp ? '#15803d' : '#64748b'
+                    }}>
+                      {(formPermissions as any).can_access_whatsapp ? 'Show' : 'Hidden'}
+                    </span>
+                  </div>
+
+                  {/* Approved Leaves */}
+                  <div
+                    onClick={() => setFormPermissions((prev: any) => ({ ...prev, can_access_leaves: !prev.can_access_leaves }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      backgroundColor: '#ffffff',
+                      border: (formPermissions as any).can_access_leaves ? '2px solid #8b5cf6' : '1px solid #e2e8f0',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Palmtree size={16} color={(formPermissions as any).can_access_leaves ? '#7c3aed' : '#64748b'} />
+                      <span style={{ fontSize: '12.5px', fontWeight: (formPermissions as any).can_access_leaves ? 700 : 600, color: (formPermissions as any).can_access_leaves ? '#6d28d9' : '#334155' }}>
+                        Approved Leaves
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      backgroundColor: (formPermissions as any).can_access_leaves ? '#f3e8ff' : '#f1f5f9',
+                      color: (formPermissions as any).can_access_leaves ? '#7c3aed' : '#64748b'
+                    }}>
+                      {(formPermissions as any).can_access_leaves ? 'Show' : 'Hidden'}
+                    </span>
+                  </div>
+
+                  {/* Proxy & IP Security */}
+                  <div
+                    onClick={() => setFormPermissions((prev: any) => ({ ...prev, can_access_security: !prev.can_access_security }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      backgroundColor: '#ffffff',
+                      border: (formPermissions as any).can_access_security ? '2px solid #ef4444' : '1px solid #e2e8f0',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <ShieldAlert size={16} color={(formPermissions as any).can_access_security ? '#dc2626' : '#64748b'} />
+                      <span style={{ fontSize: '12.5px', fontWeight: (formPermissions as any).can_access_security ? 700 : 600, color: (formPermissions as any).can_access_security ? '#b91c1c' : '#334155' }}>
+                        Proxy & IP Security
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      backgroundColor: (formPermissions as any).can_access_security ? '#fee2e2' : '#f1f5f9',
+                      color: (formPermissions as any).can_access_security ? '#dc2626' : '#64748b'
+                    }}>
+                      {(formPermissions as any).can_access_security ? 'Show' : 'Hidden'}
+                    </span>
+                  </div>
+
+                  {/* Reset Bound IP Permission */}
+                  <div
+                    onClick={() => setFormPermissions((prev: any) => ({ ...prev, can_reset_ip: !prev.can_reset_ip }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      backgroundColor: '#ffffff',
+                      border: (formPermissions as any).can_reset_ip ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <RotateCcw size={16} color={(formPermissions as any).can_reset_ip ? '#4f46e5' : '#64748b'} />
+                      <span style={{ fontSize: '12.5px', fontWeight: (formPermissions as any).can_reset_ip ? 700 : 600, color: (formPermissions as any).can_reset_ip ? '#4338ca' : '#334155' }}>
+                        Reset Bound IP
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      backgroundColor: (formPermissions as any).can_reset_ip ? '#e0e7ff' : '#f1f5f9',
+                      color: (formPermissions as any).can_reset_ip ? '#4338ca' : '#64748b'
+                    }}>
+                      {(formPermissions as any).can_reset_ip ? 'Show' : 'Hidden'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1189,7 +1624,7 @@ export const LeadersManagementView: React.FC = () => {
                 <Trash2 size={22} />
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Delete Floor Leader?</h3>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Delete User Credential?</h3>
                 <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: '#64748b' }}>
                   {deleteModal.leader.name} (ID: {deleteModal.leader.username})
                 </p>
@@ -1197,7 +1632,7 @@ export const LeadersManagementView: React.FC = () => {
             </div>
 
             <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, margin: '0 0 20px 0' }}>
-              Are you sure you want to delete this floor leader account? They will no longer be able to log in or manage their assigned floors ({deleteModal.leader.assigned_floors.join(', ')}).
+              Are you sure you want to delete this user credential account? They will no longer be able to log in or manage their assigned floors ({deleteModal.leader.assigned_floors.join(', ')}).
             </p>
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>

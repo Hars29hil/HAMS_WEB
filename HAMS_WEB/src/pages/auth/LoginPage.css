@@ -12,7 +12,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.4s ease-out;
 }
 
 .logo-section {
@@ -128,13 +128,11 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
 }
 
-@keyframes fadeUp {
+@keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(20px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }

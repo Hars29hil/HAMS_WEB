@@ -73,11 +73,11 @@ export const StudentsView: React.FC = () => {
   const resetStudentIp = async (studentId: string, studentName: string) => {
     if (!window.confirm(`Reset IP & device binding for "${studentName}"? This will allow the student to log in from a new IP/device.`)) return;
     try {
-      await apiClient.post(`/api/students/${studentId}/reset-ip`);
-      alert(`IP binding for ${studentName} successfully reset!`);
+      const res = await apiClient.post(`/students/${studentId}/reset-ip`);
+      alert(res?.data?.message || `IP binding for ${studentName} successfully reset!`);
       fetchData();
     } catch (err: any) {
-      alert(err?.response?.data?.error || 'Failed to reset IP binding');
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to reset IP binding');
     }
   };
 

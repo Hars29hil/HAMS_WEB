@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 const { verifyAdmin, verifyAdminOrFloorLeader } = require('../middleware/auth');
 const { getCurrentIST } = require('../utils/time');
+const { normalizeHHMM, isTimeInWindow, resolveScheduleForDate } = require('../utils/scheduleHelper');
 
 const CODE_EXPIRY_MIN = parseInt(process.env.REBIND_CODE_EXPIRY_MINUTES || '10', 10);
 
@@ -23,11 +24,20 @@ router.get('/dashboard', async (req, res) => {
 
     // Determine if requester is a floor leader
     let leaderFloors = null;
+    let leaderAllowedSessions = null;
     if (req.leader) {
       if (Array.isArray(req.leader.assigned_floors) && req.leader.assigned_floors.length > 0) {
         leaderFloors = req.leader.assigned_floors.map(f => parseInt(f, 10)).filter(f => !isNaN(f));
       } else if (req.leader.floor_id !== undefined) {
         leaderFloors = [parseInt(req.leader.floor_id, 10)];
+      }
+
+      let rawSessions = req.leader.assigned_sessions;
+      if (typeof rawSessions === 'string') {
+        try { rawSessions = JSON.parse(rawSessions); } catch(e) { rawSessions = []; }
+      }
+      if (Array.isArray(rawSessions) && rawSessions.length > 0 && !rawSessions.includes('all')) {
+        leaderAllowedSessions = rawSessions.map(s => String(s).toLowerCase().trim());
       }
     }
 
@@ -45,42 +55,73 @@ router.get('/dashboard', async (req, res) => {
       console.warn('Dashboard total_students query warning:', e.message);
     }
 
-    // 2. Fetch all configured dynamic sessions
+    // 2. Fetch configured dynamic sessions (filtered for floor leader)
     let schedules = [];
     try {
-      const [schedRows] = await pool.query('SELECT session_key, session_name, icon_name, start_time, end_time, day_schedules FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC');
+      let schedQuery = 'SELECT * FROM attendance_schedules WHERE is_active = TRUE';
+      const schedParams = [];
+      if (leaderAllowedSessions && leaderAllowedSessions.length > 0) {
+        schedQuery += ' AND LOWER(session_key) IN (?)';
+        schedParams.push(leaderAllowedSessions);
+      }
+      schedQuery += ' ORDER BY start_time ASC';
+      const [schedRows] = await pool.query(schedQuery, schedParams);
       schedules = schedRows || [];
     } catch (e) {
       console.warn('Dashboard schedules query warning:', e.message);
     }
     
-    // 3. Find the most recent session taken/created (with records or latest session id on or before targetDate)
+    // 3. Find the most recent session taken/created (filtered for floor leader)
     let recentSessions = [];
     try {
-      const [rSessions] = await pool.query(`
+      let sessFilterClause = '';
+      const exactParams = [targetDate, targetDate, targetDate];
+      if (leaderAllowedSessions && leaderAllowedSessions.length > 0) {
+        sessFilterClause = ' AND LOWER(s.session_type) IN (?)';
+        exactParams.push(leaderAllowedSessions);
+      }
+
+      // First try to find a session on targetDate
+      const [exactDaySessions] = await pool.query(`
         SELECT s.id, s.session_type, s.session_date, s.starts_at, s.ends_at, sch.session_name
         FROM attendance_sessions s
         LEFT JOIN attendance_schedules sch ON LOWER(s.session_type) = LOWER(sch.session_key)
-        WHERE (LEFT(s.session_date, 10) <= ? OR s.session_date <= ? OR DATE(s.session_date) <= ?)
-        ORDER BY s.session_date DESC, s.id DESC
+        WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
+          ${sessFilterClause}
+        ORDER BY s.id DESC
         LIMIT 1
-      `, [targetDate, targetDate, targetDate]);
-      recentSessions = rSessions || [];
+      `, exactParams);
+      
+      if (exactDaySessions && exactDaySessions.length > 0) {
+        recentSessions = exactDaySessions;
+      } else {
+        const histParams = [targetDate, targetDate, targetDate];
+        if (leaderAllowedSessions && leaderAllowedSessions.length > 0) {
+          histParams.push(leaderAllowedSessions);
+        }
+        const [rSessions] = await pool.query(`
+          SELECT s.id, s.session_type, s.session_date, s.starts_at, s.ends_at, sch.session_name
+          FROM attendance_sessions s
+          LEFT JOIN attendance_schedules sch ON LOWER(s.session_type) = LOWER(sch.session_key)
+          WHERE (DATE(s.session_date) <= ? OR LEFT(s.session_date, 10) <= ? OR s.session_date <= ?)
+            ${sessFilterClause}
+          ORDER BY s.session_date DESC, s.id DESC
+          LIMIT 1
+        `, histParams);
+        recentSessions = rSessions || [];
+      }
     } catch (e) {
       console.warn('Dashboard recentSessions query warning:', e.message);
     }
 
-    let recentSessionKey = 'night';
-    let recentSessionName = 'Night Attendance';
+    let recentSessionKey = schedules.length > 0 ? schedules[0].session_key : 'night';
+    let recentSessionName = schedules.length > 0 ? schedules[0].session_name : 'Night Attendance';
     let recentSessionDate = targetDate;
 
     if (recentSessions.length > 0) {
-      recentSessionKey = recentSessions[0].session_type || 'night';
+      recentSessionKey = recentSessions[0].session_type || (schedules.length > 0 ? schedules[0].session_key : 'night');
       recentSessionName = recentSessions[0].session_name || (recentSessionKey.charAt(0).toUpperCase() + recentSessionKey.slice(1) + ' Attendance');
       recentSessionDate = recentSessions[0].session_date;
-    } else if (schedules.length > 0) {
-      recentSessionKey = schedules[0].session_key;
-      recentSessionName = schedules[0].session_name;
     }
 
     // Determine target session to display
@@ -88,10 +129,16 @@ router.get('/dashboard', async (req, res) => {
     if (activeFilterKey === 'recent') {
       activeFilterKey = recentSessionKey;
     }
+    // If leader is assigned specific sessions and requested key is invalid or not allowed, default to first assigned
+    if (leaderAllowedSessions && leaderAllowedSessions.length > 0) {
+      if (activeFilterKey !== 'all' && !leaderAllowedSessions.includes(activeFilterKey.toLowerCase())) {
+        activeFilterKey = schedules.length > 0 ? schedules[0].session_key : leaderAllowedSessions[0];
+      }
+    }
 
     let targetSessionName = 'All Combined';
     if (activeFilterKey !== 'all') {
-      const foundSched = schedules.find(s => s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
+      const foundSched = schedules.find(s => s.session_key && s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
       targetSessionName = foundSched ? foundSched.session_name : (activeFilterKey.charAt(0).toUpperCase() + activeFilterKey.slice(1) + ' Attendance');
     }
 
@@ -103,8 +150,8 @@ router.get('/dashboard', async (req, res) => {
     const sessionParams = [];
 
     if (activeFilterKey !== 'all') {
-      sessionCondition = 'AND LOWER(s.session_type) = LOWER(?)';
-      sessionParams.push(activeFilterKey);
+      sessionCondition = 'AND (LOWER(s.session_type) = LOWER(?) OR LOWER(REPLACE(s.session_type, "_", "")) = LOWER(REPLACE(?, "_", "")) OR LOWER(s.session_type) LIKE CONCAT(LOWER(?), "%"))';
+      sessionParams.push(activeFilterKey, activeFilterKey, activeFilterKey);
     }
 
     try {
@@ -113,46 +160,46 @@ router.get('/dashboard', async (req, res) => {
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+          WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
             AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
-            AND st.floor_id IN (?) ${sessionCondition}
-        `, [targetDate, targetDate, targetDate, targetDate, leaderFloors, ...sessionParams]);
+            AND (st.floor_id IN (?) OR ar.floor_id IN (?)) ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, leaderFloors, leaderFloors, ...sessionParams]);
         present_today = presentRow ? (parseInt(presentRow.present_today, 10) || 0) : 0;
 
         const [[lateRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+          WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
             AND (ar.is_late = TRUE OR ar.is_late = 1)
             AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
-            AND st.floor_id IN (?) ${sessionCondition}
-        `, [targetDate, targetDate, targetDate, targetDate, leaderFloors, ...sessionParams]);
+            AND (st.floor_id IN (?) OR ar.floor_id IN (?)) ${sessionCondition}
+        `, [targetDate, targetDate, targetDate, leaderFloors, leaderFloors, ...sessionParams]);
         late_today = lateRow ? (parseInt(lateRow.late_today, 10) || 0) : 0;
       } else {
         const [[presentRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+          WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
             AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
             ${sessionCondition}
-        `, [targetDate, targetDate, targetDate, targetDate, ...sessionParams]);
+        `, [targetDate, targetDate, targetDate, ...sessionParams]);
         present_today = presentRow ? (parseInt(presentRow.present_today, 10) || 0) : 0;
 
         const [[lateRow]] = await pool.query(`
           SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS late_today 
           FROM attendance_records ar
           JOIN attendance_sessions s ON ar.session_id = s.id
-          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-          WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+          LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+          WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
             AND (ar.is_late = TRUE OR ar.is_late = 1)
             AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
             ${sessionCondition}
-        `, [targetDate, targetDate, targetDate, targetDate, ...sessionParams]);
+        `, [targetDate, targetDate, targetDate, ...sessionParams]);
         late_today = lateRow ? (parseInt(lateRow.late_today, 10) || 0) : 0;
       }
     } catch (e) {
@@ -161,29 +208,48 @@ router.get('/dashboard', async (req, res) => {
 
     // 5. Compute summary for each available session on targetDate
     const sessionCountsMap = {};
+    let allSessionsPresentCount = 0;
     try {
       let allSessionsQuery = `
         SELECT s.session_type, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as present_count
         FROM attendance_sessions s
         LEFT JOIN attendance_records ar ON s.id = ar.session_id
-        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-        WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
+        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+        WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
           AND (st.is_active = TRUE OR ar.bank_code IS NULL OR ar.bank_code IS NOT NULL)
       `;
-      const allSessionsParams = [targetDate, targetDate, targetDate, targetDate];
+      const allSessionsParams = [targetDate, targetDate, targetDate];
       if (leaderFloors && leaderFloors.length > 0) {
-        allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
-        allSessionsParams.push(leaderFloors);
+        allSessionsQuery += ' AND (st.floor_id IN (?) OR ar.floor_id IN (?) OR ar.bank_code IS NULL)';
+        allSessionsParams.push(leaderFloors, leaderFloors);
       }
       allSessionsQuery += ' GROUP BY s.session_type';
 
       const [allSessionsToday] = await pool.query(allSessionsQuery, allSessionsParams);
       for (const row of allSessionsToday) {
         if (row.session_type) {
-          sessionCountsMap[row.session_type.toLowerCase()] = parseInt(row.present_count || 0, 10);
-          sessionCountsMap[row.session_type] = parseInt(row.present_count || 0, 10);
+          const c = parseInt(row.present_count || 0, 10);
+          sessionCountsMap[row.session_type.toLowerCase()] = c;
+          sessionCountsMap[row.session_type] = c;
         }
       }
+
+      // Compute total distinct across all sessions for 'all'
+      let totalAllQuery = `
+        SELECT COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) as total_all
+        FROM attendance_records ar
+        JOIN attendance_sessions s ON ar.session_id = s.id
+        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+        WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
+          AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
+      `;
+      const totalAllParams = [targetDate, targetDate, targetDate];
+      if (leaderFloors && leaderFloors.length > 0) {
+        totalAllQuery += ' AND (st.floor_id IN (?) OR ar.floor_id IN (?))';
+        totalAllParams.push(leaderFloors, leaderFloors);
+      }
+      const [[totalAllRow]] = await pool.query(totalAllQuery, totalAllParams);
+      allSessionsPresentCount = totalAllRow ? (parseInt(totalAllRow.total_all, 10) || 0) : 0;
     } catch (e) {
       console.warn('Dashboard allSessionsToday query warning:', e.message);
     }
@@ -193,64 +259,70 @@ router.get('/dashboard', async (req, res) => {
       isSessionConductedOrStarted = true;
     } else {
       const nowIST = getCurrentIST();
-      const todayStr = `${nowIST.getFullYear()}-${String(nowIST.getMonth() + 1).padStart(2, '0')}-${String(nowIST.getDate()).padStart(2, '0')}`;
-      
-      if (targetDate < todayStr) {
-        // If it's a past date, check if a session was created/conducted on that date
-        if (sessionCountsMap[activeFilterKey.toLowerCase()] !== undefined || sessionCountsMap[activeFilterKey] !== undefined) {
-          isSessionConductedOrStarted = true;
-        }
-      } else if (targetDate === todayStr && activeFilterKey !== 'all') {
-        const foundSched = schedules.find(s => s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
-        if (foundSched && foundSched.start_time && foundSched.end_time) {
-          const nowMins = nowIST.getHours() * 60 + nowIST.getMinutes();
-          const [sH, sM] = (foundSched.start_time || '00:00').split(':').map(Number);
-          const [eH, eM] = (foundSched.end_time || '23:59').split(':').map(Number);
-          const startMins = sH * 60 + sM;
-          const endMins = eH * 60 + eM;
-          if (startMins < endMins) {
-            if (nowMins >= startMins) isSessionConductedOrStarted = true;
-          } else {
-            if (nowMins >= startMins || nowMins <= endMins) isSessionConductedOrStarted = true;
-          }
+      const todayStr = nowIST.toISOString().slice(0, 10);
+      if (targetDate === todayStr && activeFilterKey !== 'all') {
+        const sched = schedules.find(s => s.session_key && s.session_key.toLowerCase() === activeFilterKey.toLowerCase());
+        if (sched) {
+          const resolved = resolveScheduleForDate(sched, nowIST);
+          isSessionConductedOrStarted = isTimeInWindow(nowIST, resolved.start_time, resolved.end_time);
         }
       }
     }
 
     const absent_today = isSessionConductedOrStarted ? Math.max(0, total_students - present_today) : 0;
 
-    const available_sessions = [
-      {
-        session_key: 'recent',
-        session_name: `Recent (${recentSessionName})`,
-        icon_name: 'clock',
-        actual_key: recentSessionKey,
-        present_today: sessionCountsMap[recentSessionKey.toLowerCase()] || sessionCountsMap[recentSessionKey] || 0
-      },
-      ...schedules.map(s => ({
+    let available_sessions = [];
+    if (leaderAllowedSessions && leaderAllowedSessions.length > 0) {
+      available_sessions = schedules.map(s => ({
         session_key: s.session_key,
         session_name: s.session_name,
         icon_name: s.icon_name || 'calendar',
         actual_key: s.session_key,
         present_today: sessionCountsMap[s.session_key.toLowerCase()] || sessionCountsMap[s.session_key] || 0
-      })),
-      {
-        session_key: 'all',
-        session_name: 'All Sessions Combined',
-        icon_name: 'users',
-        actual_key: 'all',
-        present_today: present_today
+      }));
+      if (available_sessions.length > 1) {
+        available_sessions.push({
+          session_key: 'all',
+          session_name: 'All Assigned Sessions',
+          icon_name: 'users',
+          actual_key: 'all',
+          present_today: allSessionsPresentCount
+        });
       }
-    ];
+    } else {
+      available_sessions = [
+        {
+          session_key: 'recent',
+          session_name: `Recent (${recentSessionName})`,
+          icon_name: 'clock',
+          actual_key: recentSessionKey,
+          present_today: sessionCountsMap[recentSessionKey.toLowerCase()] || sessionCountsMap[recentSessionKey] || 0
+        },
+        ...schedules.map(s => ({
+          session_key: s.session_key,
+          session_name: s.session_name,
+          icon_name: s.icon_name || 'calendar',
+          actual_key: s.session_key,
+          present_today: sessionCountsMap[s.session_key.toLowerCase()] || sessionCountsMap[s.session_key] || 0
+        })),
+        {
+          session_key: 'all',
+          session_name: 'All Sessions Combined',
+          icon_name: 'users',
+          actual_key: 'all',
+          present_today: allSessionsPresentCount
+        }
+      ];
+    }
 
-    // 6. 7-Day Trend leading up to targetDate
+    // 6. 7-Day Trend leading up to targetDate (Always complete 7 days)
     let weekly_stats = [];
     try {
       let weeklySessionCondition = '';
       const weeklySessionParams = [];
       if (activeFilterKey !== 'all') {
-        weeklySessionCondition = 'AND LOWER(s.session_type) = LOWER(?)';
-        weeklySessionParams.push(activeFilterKey);
+        weeklySessionCondition = 'AND (LOWER(s.session_type) = LOWER(?) OR LOWER(REPLACE(s.session_type, "_", "")) = LOWER(REPLACE(?, "_", "")) OR LOWER(s.session_type) LIKE CONCAT(LOWER(?), "%"))';
+        weeklySessionParams.push(activeFilterKey, activeFilterKey, activeFilterKey);
       }
 
       let weeklyStatsQuery = `
@@ -261,30 +333,55 @@ router.get('/dashboard', async (req, res) => {
         FROM attendance_sessions s
         JOIN attendance_records ar ON s.id = ar.session_id
         LEFT JOIN students st ON TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code)
-        WHERE (LEFT(s.session_date, 10) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR s.session_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR DATE(s.session_date) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?)
-          AND (st.is_active = TRUE OR ar.bank_code IS NULL OR ar.bank_code IS NOT NULL)
+        WHERE (DATE(s.session_date) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ? OR LEFT(s.session_date, 10) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?)
+          AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
       `;
-      const weeklyStatsParams = [targetDate, targetDate, targetDate, targetDate, targetDate, targetDate];
+      const weeklyStatsParams = [targetDate, targetDate, targetDate, targetDate];
       if (leaderFloors && leaderFloors.length > 0) {
-        weeklyStatsQuery += ' AND (st.floor_id IN (?) OR ar.bank_code IS NULL)';
-        weeklyStatsParams.push(leaderFloors);
+        weeklyStatsQuery += ' AND (st.floor_id IN (?) OR ar.floor_id IN (?))';
+        weeklyStatsParams.push(leaderFloors, leaderFloors);
       }
       weeklyStatsQuery += ` ${weeklySessionCondition} GROUP BY LEFT(s.session_date, 10) ORDER BY LEFT(s.session_date, 10) ASC`;
       weeklyStatsParams.push(...weeklySessionParams);
 
       const [weeklyStatsRows] = await pool.query(weeklyStatsQuery, weeklyStatsParams);
-      weekly_stats = (weeklyStatsRows || []).map(row => {
-        const dStr = row.date ? String(row.date).slice(0, 10) : targetDate;
-        const presentCount = parseInt(row.present || 0, 10);
-        const lateCount = parseInt(row.late || 0, 10);
-        const absentCount = Math.max(0, total_students - presentCount);
-        return {
-          date: dStr,
-          present: presentCount,
-          late: lateCount,
-          absent: absentCount
-        };
-      });
+      const statsByDate = {};
+      for (const row of weeklyStatsRows || []) {
+        const dStr = row.date ? String(row.date).slice(0, 10) : '';
+        if (dStr) {
+          statsByDate[dStr] = {
+            present: parseInt(row.present || 0, 10),
+            late: parseInt(row.late || 0, 10)
+          };
+        }
+      }
+
+      // Generate continuous 7 days
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(targetDate + 'T00:00:00');
+        d.setDate(d.getDate() - i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const dateKey = `${yyyy}-${mm}-${dd}`;
+        const found = statsByDate[dateKey];
+        if (found && found.present > 0) {
+          const absent = Math.max(0, total_students - found.present);
+          weekly_stats.push({
+            date: dateKey,
+            present: found.present,
+            late: found.late,
+            absent: absent
+          });
+        } else {
+          weekly_stats.push({
+            date: dateKey,
+            present: 0,
+            late: 0,
+            absent: 0
+          });
+        }
+      }
     } catch (e) {
       console.warn('Dashboard weekly_stats query warning:', e.message);
     }
@@ -299,27 +396,45 @@ router.get('/dashboard', async (req, res) => {
         floorsParams.push(leaderFloors);
       }
       floorsQuery += ' ORDER BY floor_id ASC';
-      const [floors] = await pool.query(floorsQuery, floorsParams);
+      let [floors] = await pool.query(floorsQuery, floorsParams);
+
+      if (!floors || floors.length === 0) {
+        const defaultFloors = [
+          { floor_id: 0, floor_name: 'Ground Floor' },
+          { floor_id: 1, floor_name: 'Floor 1' },
+          { floor_id: 2, floor_name: 'Floor 2' },
+          { floor_id: 3, floor_name: 'Floor 3' },
+          { floor_id: 4, floor_name: 'Floor 4' },
+          { floor_id: 5, floor_name: 'Floor 5' },
+          { floor_id: 6, floor_name: 'Floor 6' },
+          { floor_id: 7, floor_name: 'Floor 7' },
+          { floor_id: 8, floor_name: 'Floor 8' },
+          { floor_id: 9, floor_name: 'Floor 9' }
+        ];
+        floors = (leaderFloors && leaderFloors.length > 0)
+          ? defaultFloors.filter(f => leaderFloors.includes(f.floor_id))
+          : defaultFloors;
+      }
 
       // Live present count per floor specifically for activeFilterKey on targetDate
       let floorPresentQuery = `
-        SELECT st.floor_id, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count
+        SELECT COALESCE(st.floor_id, ar.floor_id, 0) AS floor_id, COUNT(DISTINCT TRIM(LEADING '0' FROM ar.bank_code)) AS present_count
         FROM attendance_records ar
         JOIN attendance_sessions s ON ar.session_id = s.id
-        JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR ar.student_id = st.id)
-        WHERE (LEFT(s.session_date, 10) = ? OR s.session_date LIKE CONCAT(?, '%') OR s.session_date = ? OR DATE(s.session_date) = ?)
-          AND (st.is_active = TRUE OR st.is_active IS NULL)
+        LEFT JOIN students st ON (TRIM(LEADING '0' FROM st.student_code) = TRIM(LEADING '0' FROM ar.bank_code) OR st.student_code = ar.bank_code)
+        WHERE (DATE(s.session_date) = ? OR LEFT(s.session_date, 10) = ? OR s.session_date = ?)
+          AND (st.is_active = TRUE OR ar.bank_code IS NOT NULL)
       `;
-      const floorPresentParams = [targetDate, targetDate, targetDate, targetDate];
+      const floorPresentParams = [targetDate, targetDate, targetDate];
       if (activeFilterKey !== 'all') {
-        floorPresentQuery += ' AND LOWER(s.session_type) = LOWER(?)';
-        floorPresentParams.push(activeFilterKey);
+        floorPresentQuery += ' AND (LOWER(s.session_type) = LOWER(?) OR LOWER(REPLACE(s.session_type, "_", "")) = LOWER(REPLACE(?, "_", "")) OR LOWER(s.session_type) LIKE CONCAT(LOWER(?), "%"))';
+        floorPresentParams.push(activeFilterKey, activeFilterKey, activeFilterKey);
       }
       if (leaderFloors && leaderFloors.length > 0) {
-        floorPresentQuery += ' AND st.floor_id IN (?)';
-        floorPresentParams.push(leaderFloors);
+        floorPresentQuery += ' AND (st.floor_id IN (?) OR ar.floor_id IN (?))';
+        floorPresentParams.push(leaderFloors, leaderFloors);
       }
-      floorPresentQuery += ' GROUP BY st.floor_id';
+      floorPresentQuery += ' GROUP BY COALESCE(st.floor_id, ar.floor_id, 0)';
 
       const [floorPresentRows] = await pool.query(floorPresentQuery, floorPresentParams);
       const floorPresentMap = {};
@@ -419,7 +534,7 @@ router.get('/dashboard', async (req, res) => {
     if (targetDates.length > 0) {
       try {
         let recQuery = `
-          SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, ar.student_id, LEFT(ses.session_date, 10) as session_date
+          SELECT TRIM(LEADING '0' FROM ar.bank_code) as bank_code, LEFT(ses.session_date, 10) as session_date
           FROM attendance_records ar
           JOIN attendance_sessions ses ON ar.session_id = ses.id
           WHERE LEFT(ses.session_date, 10) IN (?) OR ses.session_date IN (?) OR DATE(ses.session_date) IN (?)
@@ -435,7 +550,6 @@ router.get('/dashboard', async (req, res) => {
           const dateStr = !isNaN(dObj.getTime())
             ? `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`
             : String(r.session_date).slice(0, 10);
-          if (r.student_id) attendedSet.add(`${r.student_id}_${dateStr}`);
           if (r.bank_code) attendedSet.add(`${r.bank_code}_${dateStr}`);
         }
       } catch (recErr) {
@@ -909,19 +1023,46 @@ router.put('/sessions/:session_key', verifyAdmin, async (req, res) => {
 
 // ------------------------------------------------------------
 // DELETE /api/admin/sessions/:session_key
+// Cascades: Deletes all attendance_records, attendance_sessions,
+// attendance_absent_reasons, floor_session_targets, and attendance_schedules
 // ------------------------------------------------------------
 router.delete('/sessions/:session_key', async (req, res) => {
   try {
     const { session_key } = req.params;
+    const sKey = (session_key || '').toLowerCase();
+
+    // 1. Find all attendance_sessions of this type
+    const [sessRows] = await pool.query(
+      `SELECT id FROM attendance_sessions 
+       WHERE LOWER(session_type) = LOWER(?) OR LOWER(REPLACE(session_type, "_", "")) = LOWER(REPLACE(?, "_", "")) OR LOWER(session_type) LIKE CONCAT(LOWER(?), "%")`,
+      [sKey, sKey, sKey]
+    );
+
+    if (sessRows.length > 0) {
+      const sids = sessRows.map(s => s.id);
+      // Delete all attendance records
+      await pool.query('DELETE FROM attendance_records WHERE session_id IN (?)', [sids]);
+      // Delete attendance session instances
+      await pool.query('DELETE FROM attendance_sessions WHERE id IN (?)', [sids]);
+    }
+
+    // 2. Delete absence reasons for this session
+    try {
+      await pool.query('DELETE FROM attendance_absent_reasons WHERE LOWER(session_type) = LOWER(?)', [sKey]);
+    } catch(e) {}
+
+    // 3. Delete floor session target assignments for this session
+    try {
+      await pool.query('DELETE FROM floor_session_targets WHERE LOWER(session_key) = LOWER(?)', [sKey]);
+    } catch(e) {}
+
+    // 4. Delete the schedule itself
+    await pool.query('DELETE FROM attendance_schedules WHERE LOWER(session_key) = LOWER(?)', [sKey]);
     
-    // We could either DELETE it completely or just set is_active = FALSE.
-    // Let's actually delete it to keep it clean.
-    await pool.query('DELETE FROM attendance_schedules WHERE session_key = ?', [session_key]);
-    
-    return res.json({ success: true, message: 'Session deleted successfully' });
+    return res.json({ success: true, message: 'Session and all associated attendance records deleted successfully' });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Error deleting session:', err);
+    return res.status(500).json({ success: false, message: 'Server error: ' + (err.sqlMessage || err.message) });
   }
 });
 
@@ -1202,9 +1343,9 @@ router.get('/security/device-logs', async (req, res) => {
       SELECT 
         l.*,
         s1.room_number AS primary_room,
-        s1.phone_number AS primary_phone,
+        COALESCE(s1.phone_number, s1.assigned_mobile) AS primary_phone,
         s2.room_number AS attempted_room,
-        s2.phone_number AS attempted_phone
+        COALESCE(s2.phone_number, s2.assigned_mobile) AS attempted_phone
       FROM device_ip_security_logs l
       LEFT JOIN students s1 ON (l.primary_student_id = s1.id OR TRIM(LEADING '0' FROM l.primary_student_code) = TRIM(LEADING '0' FROM s1.student_code))
       LEFT JOIN students s2 ON (l.attempted_student_id = s2.id OR TRIM(LEADING '0' FROM l.attempted_student_code) = TRIM(LEADING '0' FROM s2.student_code))
@@ -1212,22 +1353,145 @@ router.get('/security/device-logs', async (req, res) => {
       LIMIT 100
     `);
 
+    // Fetch active session schedules to resolve session name for each attempt
+    let schedules = [];
+    try {
+      const [schedRows] = await pool.query('SELECT * FROM attendance_schedules WHERE is_active = TRUE ORDER BY start_time ASC');
+      schedules = schedRows || [];
+    } catch (schedErr) {}
+
+    // Fetch external student basic details map for accurate phone numbers and rooms
+    const extMap = new Map();
+    try {
+      const https = require('https');
+      const apiData = await new Promise((resolve) => {
+        const reqExt = https.get('https://api.avdvvn.org/public/getStudentBasicDetails', {
+          headers: { 'x-hsh-auth-token': 'aF92Kx7QmN4Lp8Vz' },
+          timeout: 4000
+        }, (resExt) => {
+          let data = '';
+          resExt.on('data', chunk => data += chunk);
+          resExt.on('end', () => {
+            try { resolve(JSON.parse(data)); } catch(e) { resolve(null); }
+          });
+        });
+        reqExt.on('error', () => resolve(null));
+        reqExt.on('timeout', () => { reqExt.destroy(); resolve(null); });
+      });
+
+      if (apiData && Array.isArray(apiData.data)) {
+        for (const s of apiData.data) {
+          const cCode = String(s.bankCode).replace(/^0+(?=\d)/, '');
+          extMap.set(cCode, s);
+          extMap.set(String(s.bankCode), s);
+        }
+      }
+    } catch (e) {}
+
+    function getSessionNameForTime(attemptedAtStr) {
+      if (!attemptedAtStr) return 'General';
+      try {
+        const parts = String(attemptedAtStr).split(/[- :]/);
+        let h = 0, m = 0;
+        if (parts.length >= 5) {
+          h = parseInt(parts[3], 10) || 0;
+          m = parseInt(parts[4], 10) || 0;
+        }
+        const timeMinutes = h * 60 + m;
+        for (const s of schedules) {
+          const [sh, sm] = (s.start_time || '00:00').split(':').map(Number);
+          const [eh, em] = (s.end_time || '23:59').split(':').map(Number);
+          const sMin = sh * 60 + sm;
+          const eMin = eh * 60 + em;
+          if (timeMinutes >= sMin && timeMinutes <= eMin) {
+            return s.session_name || s.session_key;
+          }
+        }
+        if (h >= 5 && h < 12) return 'Morning Session';
+        if (h >= 12 && h < 17) return 'Afternoon Session';
+        if (h >= 17 && h < 22) return 'Evening Session';
+        return 'Night Session';
+      } catch (e) {
+        return 'General';
+      }
+    }
+
+    // Fetch all student tags map
+    const tagsByStudentId = {};
+    const tagsByStudentCode = {};
+    try {
+      const [tagRows] = await pool.query(`
+        SELECT sta.student_id, s.student_code, t.id as tag_id, t.name, t.color, t.is_system
+        FROM student_tag_assignments sta
+        JOIN student_tags t ON sta.tag_id = t.id
+        JOIN students s ON sta.student_id = s.id
+      `);
+      for (const tr of tagRows) {
+        const tagObj = { id: tr.tag_id, name: tr.name, color: tr.color, is_system: tr.is_system };
+        if (!tagsByStudentId[tr.student_id]) tagsByStudentId[tr.student_id] = [];
+        tagsByStudentId[tr.student_id].push(tagObj);
+
+        if (tr.student_code) {
+          const cleanCode = String(tr.student_code).replace(/^0+/, '');
+          if (!tagsByStudentCode[cleanCode]) tagsByStudentCode[cleanCode] = [];
+          tagsByStudentCode[cleanCode].push(tagObj);
+          if (!tagsByStudentCode[tr.student_code]) tagsByStudentCode[tr.student_code] = [];
+          tagsByStudentCode[tr.student_code].push(tagObj);
+        }
+      }
+    } catch (tagErr) {
+      console.warn('[SecurityLogs Tag Fetch Warning]', tagErr.message);
+    }
+
+    const enrichedLogs = logs.map(log => {
+      const pCleanCode = String(log.primary_student_code || '').replace(/^0+(?=\d)/, '');
+      const aCleanCode = String(log.attempted_student_code || '').replace(/^0+(?=\d)/, '');
+      const pExt = extMap.get(pCleanCode) || extMap.get(String(log.primary_student_code || ''));
+      const aExt = extMap.get(aCleanCode) || extMap.get(String(log.attempted_student_code || ''));
+
+      const pTags = tagsByStudentId[log.primary_student_id] || tagsByStudentCode[pCleanCode] || tagsByStudentCode[log.primary_student_code] || [];
+      const aTags = tagsByStudentId[log.attempted_student_id] || tagsByStudentCode[aCleanCode] || tagsByStudentCode[log.attempted_student_code] || [];
+
+      return {
+        ...log,
+        primary_phone: pExt?.phone || log.primary_phone || '',
+        primary_room: pExt?.room || log.primary_room || '',
+        primary_tags: pTags,
+        attempted_phone: aExt?.phone || log.attempted_phone || '',
+        attempted_room: aExt?.room || log.attempted_room || '',
+        attempted_tags: aTags,
+        session_name: getSessionNameForTime(log.attempted_at)
+      };
+    });
+
     const [bindings] = await pool.query(`
       SELECT 
         b.*,
         COALESCE(s.room_number, '') AS room_number,
-        COALESCE(s.phone_number, '') AS phone_number
+        COALESCE(s.phone_number, s.assigned_mobile, '') AS phone_number
       FROM device_ip_bindings b
       LEFT JOIN students s ON (b.student_id = s.id OR TRIM(LEADING '0' FROM b.student_code) = TRIM(LEADING '0' FROM s.student_code))
       ORDER BY b.last_login_at DESC
       LIMIT 100
     `);
 
+    const enrichedBindings = bindings.map(bind => {
+      const bClean = String(bind.student_code || '').replace(/^0+(?=\d)/, '');
+      const bExt = extMap.get(bClean) || extMap.get(String(bind.student_code || ''));
+      const bTags = tagsByStudentId[bind.student_id] || tagsByStudentCode[bClean] || tagsByStudentCode[bind.student_code] || [];
+      return {
+        ...bind,
+        phone_number: bExt?.phone || bind.phone_number || '',
+        room_number: bExt?.room || bind.room_number || '',
+        tags: bTags
+      };
+    });
+
     return res.json({
       success: true,
       data: {
-        logs,
-        bindings
+        logs: enrichedLogs,
+        bindings: enrichedBindings
       }
     });
   } catch (err) {
@@ -1239,8 +1503,9 @@ router.get('/security/device-logs', async (req, res) => {
 // POST /api/admin/security/authorize
 router.post('/security/authorize', async (req, res) => {
   try {
-    const { log_id, ip_address, attempted_student_id } = req.body;
+    const { log_id, ip_address, attempted_student_id, reason, justification } = req.body;
     const authorizerName = req.admin ? 'ADMIN' : (req.leader?.username || req.leader?.name || 'ADMIN');
+    const justificationText = String(reason || justification || '').trim();
 
     if (log_id) {
       const [logRows] = await pool.query('SELECT * FROM device_ip_security_logs WHERE id = ?', [log_id]);
@@ -1248,32 +1513,76 @@ router.post('/security/authorize', async (req, res) => {
         return res.status(404).json({ success: false, message: 'Log entry not found' });
       }
       const log = logRows[0];
+      const updatedDetails = justificationText 
+        ? `${log.details || ''} [Justification: ${justificationText}]`.trim() 
+        : (log.details || 'Authorized by admin office');
+
+      const { getISTDate } = require('../services/deviceSecurity');
+      const istNow = getISTDate();
 
       await pool.query(
         `UPDATE device_ip_security_logs 
-         SET status = 'AUTHORIZED_BY_ADMIN', resolved_by = ?, resolved_at = NOW() 
+         SET status = 'AUTHORIZED_BY_ADMIN', resolved_by = ?, resolved_at = ?, details = ? 
          WHERE id = ?`,
-        [authorizerName, log_id]
+        [authorizerName, istNow, updatedDetails, log_id]
       );
+
+      // Reset the Previously Bound Student's IP and device binding so they can log in cleanly
+      if (log.primary_student_id || log.primary_student_code) {
+        const pId = log.primary_student_id;
+        const pCode = log.primary_student_code;
+        const cleanPCode = String(pCode || '').replace(/^0+/, '');
+
+        try {
+          await pool.query(
+            `DELETE FROM device_ip_bindings 
+             WHERE student_id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+            [pId, pCode, cleanPCode]
+          );
+        } catch (delErr) {
+          console.warn('Reset previous binding warning:', delErr.message);
+        }
+
+        try {
+          await pool.query(
+            `UPDATE students 
+             SET device_uuid = NULL, last_known_ip = NULL, is_device_bound = FALSE 
+             WHERE id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+            [pId, pCode, cleanPCode]
+          );
+        } catch (stErr) {
+          console.warn('Reset student device warning:', stErr.message);
+        }
+      }
 
       // Upsert binding so the attempted student can login without friction
-      await pool.query(
-        `INSERT INTO device_ip_bindings (ip_address, student_id, student_code, student_name, device_uuid, last_login_at, is_whitelisted)
-         VALUES (?, ?, ?, ?, ?, NOW(), FALSE)
-         ON DUPLICATE KEY UPDATE 
-           student_code = VALUES(student_code),
-           student_name = VALUES(student_name),
-           last_login_at = NOW()`,
-        [log.ip_address, log.attempted_student_id, log.attempted_student_code, log.attempted_student_name, log.device_uuid]
-      );
+      try {
+        await pool.query(
+          `INSERT INTO device_ip_bindings (ip_address, student_id, student_code, student_name, device_uuid, last_login_at, is_whitelisted)
+           VALUES (?, ?, ?, ?, ?, ?, FALSE)
+           ON DUPLICATE KEY UPDATE 
+             student_code = VALUES(student_code),
+             student_name = VALUES(student_name),
+             last_login_at = VALUES(last_login_at)`,
+          [log.ip_address, log.attempted_student_id, log.attempted_student_code, log.attempted_student_name, log.device_uuid, istNow]
+        );
+      } catch (bindErr) {
+        console.warn('Binding attempted student warning:', bindErr.message);
+      }
 
-      return res.json({ success: true, message: `Authorized student ${log.attempted_student_name} on IP ${log.ip_address}` });
+      return res.json({ 
+        success: true, 
+        message: `Student ${log.attempted_student_name} authorized and previously bound device/IP for ${log.primary_student_name || 'student'} reset successfully!` 
+      });
     } else if (ip_address && attempted_student_id) {
+      const { getISTDate } = require('../services/deviceSecurity');
+      const istNow = getISTDate();
+
       await pool.query(
         `UPDATE device_ip_security_logs 
-         SET status = 'AUTHORIZED_BY_ADMIN', resolved_by = ?, resolved_at = NOW() 
+         SET status = 'AUTHORIZED_BY_ADMIN', resolved_by = ?, resolved_at = ? 
          WHERE ip_address = ? AND attempted_student_id = ?`,
-        [authorizerName, ip_address, attempted_student_id]
+        [authorizerName, istNow, ip_address, attempted_student_id]
       );
       return res.json({ success: true, message: 'Authorized successfully' });
     } else {
@@ -1285,37 +1594,84 @@ router.post('/security/authorize', async (req, res) => {
   }
 });
 
+// POST /api/admin/security/un-justify (Revoke Authorization / Re-block)
+router.post('/security/un-justify', async (req, res) => {
+  try {
+    const { log_id } = req.body;
+    if (!log_id) {
+      return res.status(400).json({ success: false, message: 'Missing log_id' });
+    }
+
+    const [logRows] = await pool.query('SELECT * FROM device_ip_security_logs WHERE id = ?', [log_id]);
+    if (logRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Log entry not found' });
+    }
+    const log = logRows[0];
+
+    // Revert status to BLOCKED and clear resolution details
+    await pool.query(
+      `UPDATE device_ip_security_logs 
+       SET status = 'BLOCKED', resolved_by = NULL, resolved_at = NULL 
+       WHERE id = ?`,
+      [log_id]
+    );
+
+    // Remove any active binding created for this attempted student on this device/IP
+    if (log.attempted_student_id) {
+      await pool.query(
+        `DELETE FROM device_ip_bindings 
+         WHERE (student_id = ? OR student_code = ?) AND (ip_address = ? OR (device_uuid IS NOT NULL AND device_uuid = ?))`,
+        [log.attempted_student_id, log.attempted_student_code, log.ip_address, log.device_uuid]
+      );
+    }
+
+    return res.json({ 
+      success: true, 
+      message: `Justification revoked. Student ${log.attempted_student_name} is now blocked again.` 
+    });
+  } catch (err) {
+    console.error('Unjustify Security Error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 // POST /api/admin/security/clear-binding
 router.post('/security/clear-binding', async (req, res) => {
   try {
     const { binding_id, ip_address, student_id } = req.body;
     if (student_id) {
-      await pool.query('DELETE FROM device_ip_bindings WHERE student_id = ?', [student_id]);
+      const cleanId = String(student_id).replace(/^0+/, '');
+      await pool.query(
+        'DELETE FROM device_ip_bindings WHERE student_id = ? OR student_code = ? OR TRIM(LEADING \'0\' FROM student_code) = ?',
+        [student_id, student_id, cleanId]
+      );
       try {
         await pool.query(
-          'UPDATE students SET device_uuid = NULL, registered_ip = NULL, registered_device_fingerprint = NULL, last_known_ip = NULL, is_device_bound = 0 WHERE id = ?',
-          [student_id]
+          'UPDATE students SET device_uuid = NULL, last_known_ip = NULL, is_device_bound = FALSE WHERE id = ? OR student_code = ? OR TRIM(LEADING \'0\' FROM student_code) = ?',
+          [student_id, student_id, cleanId]
         );
       } catch (colErr) {
-        // Fallback if some columns don't exist
-        await pool.query('UPDATE students SET device_uuid = NULL WHERE id = ?', [student_id]);
+        await pool.query('UPDATE students SET device_uuid = NULL WHERE id = ? OR student_code = ?', [student_id, student_id]);
       }
       try {
         await pool.query(
           `UPDATE device_ip_security_logs 
            SET status = 'RESOLVED', resolved_by = 'ADMIN', resolved_at = NOW() 
-           WHERE attempted_student_id = ? OR primary_student_id = ?`,
-          [student_id, student_id]
+           WHERE attempted_student_id = ? OR primary_student_id = ? OR attempted_student_code = ? OR primary_student_code = ?`,
+          [student_id, student_id, student_id, student_id]
         );
       } catch (logErr) {}
       return res.json({ success: true, message: 'Device & IP binding cleared successfully' });
     } else if (binding_id) {
       // Find the binding first to know the student_id
-      const [bRows] = await pool.query('SELECT student_id FROM device_ip_bindings WHERE id = ?', [binding_id]);
+      const [bRows] = await pool.query('SELECT student_id, student_code FROM device_ip_bindings WHERE id = ?', [binding_id]);
       await pool.query('DELETE FROM device_ip_bindings WHERE id = ?', [binding_id]);
-      if (bRows.length > 0 && bRows[0].student_id) {
+      if (bRows.length > 0) {
+        const sId = bRows[0].student_id;
+        const sCode = bRows[0].student_code;
         try {
-          await pool.query('UPDATE students SET device_uuid = NULL WHERE id = ?', [bRows[0].student_id]);
+          await pool.query('UPDATE students SET device_uuid = NULL, last_known_ip = NULL, is_device_bound = FALSE WHERE id = ? OR student_code = ?', [sId, sCode]);
         } catch (e) {}
       }
       return res.json({ success: true, message: 'IP binding cleared successfully' });

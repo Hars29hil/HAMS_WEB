@@ -10,107 +10,39 @@ const SECRET_KEY = process.env.AES_SECRET_KEY || 'HAMS_SECRET_KEY!'; // Must be 
 
 const MIN_RSSI = parseInt(process.env.MIN_RSSI || '-100', 10);
 
-// Helper to normalize time strings to HH:MM format
-function normalizeHHMM(timeStr) {
-  if (!timeStr) return '00:00';
-  const parts = String(timeStr).trim().split(':');
-  const h = parseInt(parts[0] || '0', 10);
-  const m = parseInt(parts[1] || '0', 10);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
+const { 
+  normalizeHHMM, 
+  isTimeInWindow, 
+  resolveScheduleForDate, 
+  getSessionDateTimes 
+} = require('../utils/scheduleHelper');
 
-// Check if current IST time falls within a given start/end time window
-function isTimeInWindow(now, startTimeStr, endTimeStr) {
-  const normStart = normalizeHHMM(startTimeStr);
-  const normEnd = normalizeHHMM(endTimeStr);
-  const [startH, startM] = normStart.split(':').map(Number);
-  const [endH, endM] = normEnd.split(':').map(Number);
-  
-  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
-
-  if (startMinutes > endMinutes) {
-    // Overnight window (e.g. 22:30 to 06:00)
-    return nowMinutes >= startMinutes || nowMinutes <= endMinutes;
-  } else if (startMinutes < endMinutes) {
-    // Normal window (e.g. 02:20 to 23:05 or 06:00 to 07:00)
-    return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
-  } else {
-    return false;
+// Helper to check if a floor leader has write/edit permissions for a specific session
+function checkLeaderWritePermission(req, sessionKey) {
+  if (!req.leader) return true; // Admins / super users have full access
+  const sKey = (sessionKey || '').toLowerCase().trim();
+  let perms = req.leader.session_permissions;
+  if (typeof perms === 'string') {
+    try { perms = JSON.parse(perms); } catch(e) { perms = {}; }
   }
-}
+  perms = perms || {};
 
-// Construct start and end Date objects for DB recording
-function getSessionDateTimes(sessionDateStr, startTimeStr, endTimeStr) {
-  const normStart = normalizeHHMM(startTimeStr);
-  const normEnd = normalizeHHMM(endTimeStr);
-  const [startH, startM] = normStart.split(':').map(Number);
-  const [endH, endM] = normEnd.split(':').map(Number);
-
-  const y = parseInt(sessionDateStr.slice(0, 4), 10);
-  const m = parseInt(sessionDateStr.slice(5, 7), 10) - 1;
-  const d = parseInt(sessionDateStr.slice(8, 10), 10);
-
-  const startDt = new Date(Date.UTC(y, m, d, startH, startM, 0));
-  let endDt = new Date(Date.UTC(y, m, d, endH, endM, 0));
-  if (startH * 60 + startM > endH * 60 + endM) {
-    endDt = new Date(Date.UTC(y, m, d + 1, endH, endM, 0));
-  }
-  return { startDt, endDt };
-}
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-// Resolves start_time, end_time, late_time for a given date/day of week
-function resolveScheduleForDate(scheduleRow, dateObj) {
-  if (!scheduleRow) return { start_time: '00:00', end_time: '00:00', late_time: null, day_schedules: [] };
-
-  const now = dateObj || getCurrentIST();
-  // Get day of week in IST (0=Sun, 1=Mon, ..., 6=Sat)
-  const dayIdx = now.getUTCDay !== undefined ? now.getUTCDay() : now.getDay();
-  const dayName = DAY_NAMES[dayIdx] || 'Mon';
-
-  let daySchedules = null;
-  if (scheduleRow.day_schedules) {
-    try {
-      daySchedules = typeof scheduleRow.day_schedules === 'string'
-        ? JSON.parse(scheduleRow.day_schedules)
-        : scheduleRow.day_schedules;
-    } catch(e) {}
-  }
-
-  if (Array.isArray(daySchedules) && daySchedules.length > 0) {
-    const matchedSlot = daySchedules.find(slot =>
-      Array.isArray(slot.days) && slot.days.some(d => d && String(d).trim().toLowerCase().slice(0, 3) === dayName.toLowerCase().slice(0, 3))
-    );
-
-    const targetSlot = matchedSlot || daySchedules[0];
-    const sTime = targetSlot ? (targetSlot.startTime || targetSlot.start_time) : null;
-    const eTime = targetSlot ? (targetSlot.endTime || targetSlot.end_time) : null;
-    const lTime = targetSlot ? (targetSlot.lateTime !== undefined ? targetSlot.lateTime : targetSlot.late_time) : null;
-
-    if (sTime && eTime) {
-      return {
-        start_time: normalizeHHMM(sTime),
-        end_time: normalizeHHMM(eTime),
-        late_time: lTime ? normalizeHHMM(lTime) : null,
-        day_schedules: daySchedules,
-        matched_day: dayName,
-        is_day_matched: Boolean(matchedSlot)
-      };
+  let mode = perms[sKey];
+  if (!mode) {
+    for (const k of Object.keys(perms)) {
+      if (k.toLowerCase().trim() === sKey) {
+        mode = perms[k];
+        break;
+      }
     }
   }
+  if (!mode) {
+    mode = perms['all'] || 'edit';
+  }
 
-  return {
-    start_time: normalizeHHMM(scheduleRow.start_time || '21:00'),
-    end_time: normalizeHHMM(scheduleRow.end_time || '21:30'),
-    late_time: scheduleRow.late_time ? normalizeHHMM(scheduleRow.late_time) : null,
-    day_schedules: Array.isArray(daySchedules) ? daySchedules : [],
-    matched_day: dayName,
-    is_day_matched: false
-  };
+  return mode === 'edit';
 }
+
 
 // ------------------------------------------------------------
 // GET /api/attendance/schedule-data
@@ -131,22 +63,26 @@ router.get('/schedule-data', async (req, res) => {
 
     const formattedSessions = rows.map(r => {
       const resolved = resolveScheduleForDate(r, now);
+      let daySchedules = r.day_schedules;
+      if (typeof daySchedules === 'string') {
+        try { daySchedules = JSON.parse(daySchedules); } catch(e) { daySchedules = []; }
+      }
       return {
         id: r.id,
         session_key: r.session_key,
         session_name: r.session_name,
-        start_time: resolved.start_time,
-        end_time: resolved.end_time,
-        late_time: resolved.late_time,
-        day_schedules: resolved.day_schedules,
+        start_time: resolved.start_time || normalizeHHMM(r.start_time),
+        end_time: resolved.end_time || normalizeHHMM(r.end_time),
+        late_time: resolved.late_time || (r.late_time ? normalizeHHMM(r.late_time) : null),
+        day_schedules: Array.isArray(daySchedules) && daySchedules.length > 0 ? daySchedules : (resolved.day_schedules || []),
         is_for_all_students: r.is_for_all_students !== undefined ? Boolean(r.is_for_all_students) : true,
-        icon_name: r.icon_name || 'moon',
+        icon_name: r.icon_name || 'users',
         is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
         linked_session_key: r.linked_session_key || null,
         auto_message: r.auto_message || null,
         auto_message_time: r.auto_message_time || null,
-        auto_message_audience: r.auto_message_audience || 'all',
-        auto_message_student: r.auto_message_student || null,
+        auto_message_audience: r.auto_message_audience || 'absent',
+        auto_message_student: r.auto_message_student || r.auto_message || null,
         auto_message_parent: r.auto_message_parent || null,
         created_at: r.created_at
       };
@@ -192,6 +128,29 @@ router.get('/my-status', verifyStudent, async (req, res) => {
 
     const allSchedules = scheduleRows.map(r => {
       const resolved = resolveScheduleForDate(r, now);
+      let daySchedules = r.day_schedules;
+      if (typeof daySchedules === 'string') {
+        try { daySchedules = JSON.parse(daySchedules); } catch(e) { daySchedules = []; }
+      }
+
+      let activeDays = [];
+      let defaultTimeSlot = null;
+      if (Array.isArray(daySchedules) && daySchedules.length > 0) {
+        for (const slot of daySchedules) {
+          if (Array.isArray(slot.days)) {
+            activeDays.push(...slot.days);
+            if (!defaultTimeSlot && (slot.startTime || slot.start_time)) {
+              defaultTimeSlot = slot;
+            }
+          }
+        }
+      }
+      const uniqueDays = Array.from(new Set(activeDays));
+      const isEveryDay = uniqueDays.length === 7 || uniqueDays.length === 0;
+      const isScheduledToday = resolved.is_active_today !== false && resolved.start_time !== '00:00';
+      const slotStartTime = defaultTimeSlot ? (defaultTimeSlot.startTime || defaultTimeSlot.start_time) : r.start_time;
+      const slotEndTime = defaultTimeSlot ? (defaultTimeSlot.endTime || defaultTimeSlot.end_time) : r.end_time;
+
       return {
         session_key: r.session_key,
         session_name: r.session_name || r.session_key,
@@ -199,8 +158,13 @@ router.get('/my-status', verifyStudent, async (req, res) => {
         start_time: resolved.start_time,
         end_time: resolved.end_time,
         late_time: resolved.late_time,
+        base_start_time: slotStartTime ? normalizeHHMM(slotStartTime) : '21:00',
+        base_end_time: slotEndTime ? normalizeHHMM(slotEndTime) : '21:30',
         day_schedules: resolved.day_schedules,
-        is_for_all_students: r.is_for_all_students
+        is_for_all_students: r.is_for_all_students,
+        is_active_today: isScheduledToday,
+        scheduled_days: uniqueDays,
+        days_label: isEveryDay ? 'Every day' : uniqueDays.join(', ')
       };
     });
 
@@ -211,13 +175,15 @@ router.get('/my-status', verifyStudent, async (req, res) => {
         end: row.end_time, 
         name: row.session_name,
         start_time: row.start_time,
-        end_time: row.end_time
+        end_time: row.end_time,
+        is_active_today: row.is_active_today,
+        days_label: row.days_label
       };
     }
 
     let activeSession = null;
     for (const sched of allSchedules) {
-      if (isTimeInWindow(now, sched.start_time, sched.end_time)) {
+      if (sched.is_active_today && sched.start_time !== '00:00' && isTimeInWindow(now, sched.start_time, sched.end_time)) {
         activeSession = sched;
         break;
       }
@@ -225,9 +191,9 @@ router.get('/my-status', verifyStudent, async (req, res) => {
 
     let attendanceActive = activeSession !== null;
     let activeSessionType = activeSession ? activeSession.session_key : null;
-    let activeSessionName = activeSession ? activeSession.session_name : (allSchedules[0]?.session_name || 'Night Attendance');
-    let startTimeStr = activeSession ? activeSession.start_time : (allSchedules[0]?.start_time || '22:30');
-    let endTimeStr = activeSession ? activeSession.end_time : (allSchedules[0]?.end_time || '23:05');
+    let activeSessionName = activeSession ? activeSession.session_name : (allSchedules.find(s => s.is_active_today)?.session_name || allSchedules[0]?.session_name || 'Night Attendance');
+    let startTimeStr = activeSession ? activeSession.start_time : '';
+    let endTimeStr = activeSession ? activeSession.end_time : '';
 
     // Ensure fallback for legacy app expecting 'night' in schedules
     if (!schedules.night) {
@@ -485,6 +451,10 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
     } = req.body;
     const sessionType = (type || 'night').toLowerCase();
 
+    if (!checkLeaderWritePermission(req, sessionType)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot modify schedule settings.' });
+    }
+
     if (!startTime || !endTime) {
       return res.status(400).json({ success: false, message: 'Missing startTime or endTime' });
     }
@@ -591,6 +561,9 @@ router.put('/schedule', verifyAdminOrFloorLeader, async (req, res) => {
 router.put('/schedule/:session_key/auto-message', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const sessionKey = req.params.session_key.toLowerCase();
+    if (!checkLeaderWritePermission(req, sessionKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot modify message settings.' });
+    }
     const { auto_message, auto_message_student, auto_message_parent, auto_message_time, auto_message_audience, auto_alerts_config } = req.body;
 
     // Check against session end time
@@ -731,11 +704,12 @@ async function processSessionAlerts({ sessionKey, alertsConfig, sessionDate, lea
 
   // Fetch session attendance records for this date
   const [records] = await pool.query(`
-    SELECT ar.student_id, TRIM(LEADING '0' FROM ar.bank_code) as clean_bank_code, ar.bank_code, ar.created_at, ar.status as record_status
+    SELECT TRIM(LEADING '0' FROM ar.bank_code) as clean_bank_code, ar.bank_code, ar.marked_at, ar.is_late
     FROM attendance_records ar
     JOIN attendance_sessions ses ON ar.session_id = ses.id
-    WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
-  `, [sessionDate, sessionDate, sessionKey]);
+    WHERE (DATE(ses.session_date) = ? OR LEFT(ses.session_date, 10) = ? OR ses.session_date = ?) 
+      AND (LOWER(ses.session_type) = LOWER(?) OR LOWER(REPLACE(ses.session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(ses.session_type) LIKE CONCAT(LOWER(?), '%'))
+  `, [sessionDate, sessionDate, sessionDate, sessionKey, sessionKey, sessionKey]);
 
   const recordMap = new Map();
   records.forEach(r => {
@@ -881,6 +855,9 @@ async function processSessionAlerts({ sessionKey, alertsConfig, sessionDate, lea
 router.post('/session/:session_key/send-session-alerts', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const sessionKey = req.params.session_key.toLowerCase();
+    if (!checkLeaderWritePermission(req, sessionKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot send alerts.' });
+    }
     const { alertsConfig, date, studentMessageTemplate, parentMessageTemplate, messageTemplate } = req.body;
     const sessionDate = date || getCurrentIST().toISOString().slice(0, 10);
 
@@ -906,6 +883,9 @@ router.post('/session/:session_key/send-session-alerts', verifyAdminOrFloorLeade
 router.post('/session/:session_key/send-absent-alerts', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const sessionKey = req.params.session_key.toLowerCase();
+    if (!checkLeaderWritePermission(req, sessionKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot send alerts.' });
+    }
     const { alertsConfig, date, studentMessageTemplate, parentMessageTemplate, messageTemplate } = req.body;
     const sessionDate = date || getCurrentIST().toISOString().slice(0, 10);
 
@@ -995,11 +975,48 @@ router.get('/debug-sql', async (req, res) => {
   }
 });
 
+// Helper: Check if student has Parent Control tag (allows login & marking on Chrome)
+async function hasParentControlTag(studentId, studentCode) {
+  try {
+    const cleanCode = String(studentCode || '').trim().replace(/^0+/, '');
+    const [rows] = await pool.query(
+      `SELECT t.id, t.name 
+       FROM student_tag_assignments sta
+       JOIN student_tags t ON sta.tag_id = t.id
+       JOIN students s ON sta.student_id = s.id
+       WHERE (s.id = ? OR s.student_code = ? OR TRIM(LEADING '0' FROM s.student_code) = ?)
+         AND LOWER(REPLACE(t.name, ' ', '')) = 'parentcontrol'`,
+      [studentId || 0, String(studentCode || ''), cleanCode]
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error('[hasParentControlTag in Attendance Error]', err);
+    return false;
+  }
+}
+
 // ------------------------------------------------------------
 // POST /api/attendance/mark
 // ------------------------------------------------------------
 router.post('/mark', verifyStudent, async (req, res) => {
   try {
+    // 0. Enforce Browser / Device Authorization: Bluefy on iPhone OR Parent Control Tag
+    const userAgent = (req.headers['user-agent'] || '').toLowerCase();
+    const isBluefy = userAgent.includes('bluefy');
+
+    if (!isBluefy) {
+      const studentId = req.student?.id;
+      const studentCode = req.student?.student_code;
+      const isParentControlAllowed = await hasParentControlTag(studentId, studentCode);
+      if (!isParentControlAllowed) {
+        return res.status(403).json({
+          success: false,
+          code: 'UNAUTHORIZED_DEVICE_OR_BROWSER',
+          message: 'You are not authorized. Please login again.'
+        });
+      }
+    }
+
     const { rssi } = req.body;
     if (rssi === undefined) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -1014,19 +1031,14 @@ router.post('/mark', verifyStudent, async (req, res) => {
     );
     
     const now = getCurrentIST();
-    const schedules = {};
-    for (const row of scheduleRows) {
-      const resolved = resolveScheduleForDate(row, now);
-      schedules[row.session_key] = { start: resolved.start_time, end: resolved.end_time };
-    }
-
     let activeSessionType = null;
     let activeSchedule = null;
     
-    for (const [type, times] of Object.entries(schedules)) {
-      if (isTimeInWindow(now, times.start, times.end)) {
-        activeSessionType = type;
-        activeSchedule = times;
+    for (const row of scheduleRows) {
+      const resolved = resolveScheduleForDate(row, now);
+      if (resolved.is_active_today && resolved.start_time !== '00:00' && isTimeInWindow(now, resolved.start_time, resolved.end_time)) {
+        activeSessionType = row.session_key;
+        activeSchedule = { start: resolved.start_time, end: resolved.end_time };
         break;
       }
     }
@@ -1232,25 +1244,22 @@ router.post('/manual-mark', verifyOperator, async (req, res) => {
     );
     
     const now = getCurrentIST();
-    const schedules = {};
-    for (const row of scheduleRows) {
-      const resolved = resolveScheduleForDate(row, now);
-      schedules[row.session_key] = { start: resolved.start_time, end: resolved.end_time };
-    }
-
     let activeSessionType = null;
     let activeSchedule = null;
     
-    if (session_key && schedules[session_key]) {
-      // Operator selected a specific session
-      activeSessionType = session_key;
-      activeSchedule = schedules[session_key];
+    if (session_key) {
+      const targetRow = scheduleRows.find(r => r.session_key === session_key);
+      const resolved = targetRow ? resolveScheduleForDate(targetRow, now) : null;
+      if (resolved && resolved.is_active_today && resolved.start_time !== '00:00' && isTimeInWindow(now, resolved.start_time, resolved.end_time)) {
+        activeSessionType = session_key;
+        activeSchedule = { start: resolved.start_time, end: resolved.end_time };
+      }
     } else {
-      // Auto-detect based on time
-      for (const [type, times] of Object.entries(schedules)) {
-        if (isTimeInWindow(now, times.start, times.end)) {
-          activeSessionType = type;
-          activeSchedule = times;
+      for (const row of scheduleRows) {
+        const resolved = resolveScheduleForDate(row, now);
+        if (resolved.is_active_today && resolved.start_time !== '00:00' && isTimeInWindow(now, resolved.start_time, resolved.end_time)) {
+          activeSessionType = row.session_key;
+          activeSchedule = { start: resolved.start_time, end: resolved.end_time };
           break;
         }
       }
@@ -1385,6 +1394,89 @@ router.get('/session/:id/records', verifyFloorLeader, async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+// ------------------------------------------------------------
+// DELETE /api/attendance/session/:type/records (and aliases)
+// Delete all attendance records and absent justifications for a session on a date
+// ------------------------------------------------------------
+const handleDeleteSessionAttendance = async (req, res) => {
+  try {
+    const sessionType = (req.params.type || 'night').toLowerCase();
+    if (!checkLeaderWritePermission(req, sessionType)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot delete records.' });
+    }
+    const rawDate = req.query.date || req.body.date || new Date().toISOString().slice(0, 10);
+    const sessionDate = typeof rawDate === 'string' ? rawDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+    let floorCondition = '';
+    let leaderFloors = null;
+
+    if (req.leader) {
+      leaderFloors = Array.isArray(req.leader.assigned_floors) && req.leader.assigned_floors.length > 0
+        ? req.leader.assigned_floors.map(f => parseInt(f, 10)).filter(f => !isNaN(f))
+        : (req.leader.floor_id !== undefined && !isNaN(parseInt(req.leader.floor_id, 10)) ? [parseInt(req.leader.floor_id, 10)] : []);
+      if (leaderFloors.length > 0) {
+        floorCondition = 'AND floor_id IN (?)';
+      }
+    }
+
+    // 1. Find matching sessions
+    const [sessions] = await pool.query(
+      `SELECT id FROM attendance_sessions 
+       WHERE (DATE(session_date) = ? OR LEFT(session_date, 10) = ? OR session_date = ?)
+         AND (LOWER(session_type) = LOWER(?) OR LOWER(REPLACE(session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(session_type) LIKE CONCAT(LOWER(?), '%'))`,
+      [sessionDate, sessionDate, sessionDate, sessionType, sessionType, sessionType]
+    );
+
+    let deletedRecords = 0;
+    if (sessions.length > 0) {
+      const sessionIds = sessions.map(s => s.id);
+      let delQuery = 'DELETE FROM attendance_records WHERE session_id IN (?)';
+      let delParams = [sessionIds];
+
+      if (floorCondition && leaderFloors && leaderFloors.length > 0) {
+        delQuery += ' ' + floorCondition;
+        delParams.push(leaderFloors);
+      }
+
+      const [delResult] = await pool.query(delQuery, delParams);
+      deletedRecords = delResult.affectedRows || 0;
+
+      // If user is admin (no leader floor restriction), also clean up session from attendance_sessions
+      if (!req.leader) {
+        await pool.query('DELETE FROM attendance_sessions WHERE id IN (?)', [sessionIds]);
+      }
+    }
+
+    // 2. Also delete absent justification records for this session and date
+    let absentQuery = `
+      DELETE FROM attendance_absent_reasons 
+      WHERE (session_date = ? OR DATE(session_date) = ?) 
+        AND (LOWER(session_type) = LOWER(?) OR session_type IS NULL)
+    `;
+    let absentParams = [sessionDate, sessionDate, sessionType];
+
+    if (req.leader && leaderFloors && leaderFloors.length > 0) {
+      absentQuery += ' AND student_id IN (SELECT id FROM students WHERE floor_id IN (?))';
+      absentParams.push(leaderFloors);
+    }
+
+    await pool.query(absentQuery, absentParams);
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted attendance for ${sessionType} on ${sessionDate}.`,
+      deleted_count: deletedRecords
+    });
+  } catch (err) {
+    console.error('Error deleting session attendance:', err);
+    return res.status(500).json({ success: false, message: 'Server error deleting attendance: ' + (err.sqlMessage || err.message) });
+  }
+};
+
+router.delete('/session/:type/records', verifyAdminOrFloorLeader, handleDeleteSessionAttendance);
+router.delete('/session/:type/clear', verifyAdminOrFloorLeader, handleDeleteSessionAttendance);
+router.delete('/session/:type/attendance', verifyAdminOrFloorLeader, handleDeleteSessionAttendance);
 
 // ------------------------------------------------------------
 // POST /api/attendance/gateway-sync
@@ -1563,6 +1655,9 @@ const handleManualMark = async (req, res) => {
     const { student_code, student_id, bank_code, session_key, session_type, date, session_date, status, is_late, description, remarks } = req.body;
     const lookupCode = student_code || bank_code;
     const sKey = (session_key || session_type || 'night').toLowerCase();
+    if (!checkLeaderWritePermission(req, sKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot mark attendance.' });
+    }
     const sDate = session_date || date || getCurrentIST().toISOString().slice(0, 10);
     const lateFlag = is_late === true || is_late === 1 || String(status).toLowerCase() === 'late';
     const noteText = description || remarks || null;
@@ -1737,6 +1832,9 @@ router.get('/session/:type/targets', verifyAdminOrFloorLeader, async (req, res) 
 router.post('/session/:type/targets', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const sessionKey = req.params.type.toLowerCase();
+    if (!checkLeaderWritePermission(req, sessionKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot modify student targets.' });
+    }
     const { floor_id, target_type, student_ids } = req.body;
 
     if (floor_id === undefined) {
@@ -1831,7 +1929,6 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       FROM students s
       LEFT JOIN (
         SELECT 
-          ar.student_id,
           TRIM(LEADING '0' FROM ar.bank_code) AS clean_bank_code,
           ar.bank_code,
           MIN(ar.marked_at) AS marked_at,
@@ -1840,10 +1937,10 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
           MAX(ar.session_id) AS session_id
         FROM attendance_records ar
         JOIN attendance_sessions ses ON ar.session_id = ses.id
-        WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
-        GROUP BY ar.student_id, TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
+        WHERE (DATE(ses.session_date) = ? OR LEFT(ses.session_date, 10) = ? OR ses.session_date = ?) 
+          AND (LOWER(ses.session_type) = LOWER(?) OR LOWER(REPLACE(ses.session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(ses.session_type) LIKE CONCAT(LOWER(?), '%'))
+        GROUP BY TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
       ) ar ON (
-        (ar.student_id IS NOT NULL AND ar.student_id = s.id) OR
         (ar.clean_bank_code IS NOT NULL AND ar.clean_bank_code != '' AND ar.clean_bank_code = TRIM(LEADING '0' FROM s.student_code)) OR
         ar.bank_code = s.student_code
       )
@@ -1857,7 +1954,7 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionDate, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
+    const queryParams = [sessionDate, sessionDate, sessionDate, sessionType, sessionType, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
@@ -1870,8 +1967,9 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       SELECT COUNT(*) as rec_count
       FROM attendance_records ar
       JOIN attendance_sessions ses ON ar.session_id = ses.id
-      WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
-    `, [sessionDate, sessionDate, sessionType]);
+      WHERE (DATE(ses.session_date) = ? OR LEFT(ses.session_date, 10) = ? OR ses.session_date = ?) 
+        AND (LOWER(ses.session_type) = LOWER(?) OR LOWER(REPLACE(ses.session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(ses.session_type) LIKE CONCAT(LOWER(?), '%'))
+    `, [sessionDate, sessionDate, sessionDate, sessionType, sessionType, sessionType]);
 
     const recordCount = recCountRow[0]?.rec_count || 0;
     let sessionStarted = recordCount > 0;
@@ -1960,8 +2058,9 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
       SELECT COUNT(*) as rec_count
       FROM attendance_records ar
       JOIN attendance_sessions ses ON ar.session_id = ses.id
-      WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
-    `, [sessionDate, sessionDate, sessionType]);
+      WHERE (DATE(ses.session_date) = ? OR LEFT(ses.session_date, 10) = ? OR ses.session_date = ?) 
+        AND (LOWER(ses.session_type) = LOWER(?) OR LOWER(REPLACE(ses.session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(ses.session_type) LIKE CONCAT(LOWER(?), '%'))
+    `, [sessionDate, sessionDate, sessionDate, sessionType, sessionType, sessionType]);
 
     const recordCount = recCountRow[0]?.rec_count || 0;
     let sessionStarted = recordCount > 0;
@@ -2038,16 +2137,15 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
       FROM students s
       LEFT JOIN (
         SELECT 
-          ar.student_id,
           TRIM(LEADING '0' FROM ar.bank_code) AS clean_bank_code,
           ar.bank_code,
           MAX(ar.session_id) AS session_id
         FROM attendance_records ar
         JOIN attendance_sessions ses ON ar.session_id = ses.id
-        WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
-        GROUP BY ar.student_id, TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
+        WHERE (DATE(ses.session_date) = ? OR LEFT(ses.session_date, 10) = ? OR ses.session_date = ?) 
+          AND (LOWER(ses.session_type) = LOWER(?) OR LOWER(REPLACE(ses.session_type, '_', '')) = LOWER(REPLACE(?, '_', '')) OR LOWER(ses.session_type) LIKE CONCAT(LOWER(?), '%'))
+        GROUP BY TRIM(LEADING '0' FROM ar.bank_code), ar.bank_code
       ) ar ON (
-        (ar.student_id IS NOT NULL AND ar.student_id = s.id) OR
         (ar.clean_bank_code IS NOT NULL AND ar.clean_bank_code != '' AND ar.clean_bank_code = TRIM(LEADING '0' FROM s.student_code)) OR
         ar.bank_code = s.student_code
       )
@@ -2061,7 +2159,7 @@ router.get('/session/:type/absent-reasons', verifyAdminOrFloorLeader, async (req
       ORDER BY s.name ASC
     `;
 
-    const queryParams = [sessionDate, sessionDate, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
+    const queryParams = [sessionDate, sessionDate, sessionDate, sessionType, sessionType, sessionType, sessionDate, sessionDate, sessionType, sessionDate];
     if (floorCondition && leaderFloors && leaderFloors.length > 0) {
       queryParams.push(leaderFloors);
     }
@@ -2109,6 +2207,9 @@ router.post('/session/absent-reason', verifyAdminOrFloorLeader, async (req, res)
   try {
     const { student_id, student_code, session_type, session_key, session_date, date, dates, reason, description, is_justified } = req.body;
     const sKey = (session_key || session_type || 'night').toLowerCase();
+    if (!checkLeaderWritePermission(req, sKey)) {
+      return res.status(403).json({ success: false, message: 'You have View-Only permission for this session and cannot modify absence justifications.' });
+    }
     const reasonText = (reason || description || '').trim();
 
     if (!reasonText) {

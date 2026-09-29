@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Moon, Sun, Users, Code, Book, Coffee, Activity, Calendar, Bell, Flame, Sparkles, Smartphone } from 'lucide-react';
+import { Moon, Sun, Users, Code, Book, Coffee, Activity, Calendar, Bell, Flame, Sparkles, Smartphone, PlusCircle } from 'lucide-react';
 import apiClient from '../../services/apiClient';
 import { HamsCard } from '../../components/HamsCard';
 

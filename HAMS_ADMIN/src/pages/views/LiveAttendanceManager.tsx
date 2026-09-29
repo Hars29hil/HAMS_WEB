@@ -26,6 +26,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import apiClient from '../../services/apiClient';
+import { useAuth } from '../../context/AuthContext';
 import { HamsCard } from '../../components/HamsCard';
 import { ExpandableReasonTooltip } from '../../components/ExpandableReasonTooltip';
 import './LiveAttendanceManager.css';
@@ -108,6 +109,16 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
   sessionKey,
   onSessionDeleted,
 }) => {
+  const { admin } = useAuth();
+  const isLeader = (admin?.role || '').toUpperCase() === 'LEADER' || (admin?.role || '').toLowerCase() === 'floor_leader';
+  let permissions: any = admin?.session_permissions || {};
+  if (typeof permissions === 'string') {
+    try { permissions = JSON.parse(permissions); } catch(e) { permissions = {}; }
+  }
+  const sKey = (sessionKey || '').toLowerCase();
+  const sessionPerm = permissions?.[sKey] || permissions?.[sessionKey] || permissions?.['all'] || 'edit';
+  const isViewOnly = isLeader && sessionPerm === 'view';
+
   const [sessionName, setSessionName] = useState('');
   const [isForAllStudents, setIsForAllStudents] = useState(true);
   const [startTime, setStartTime] = useState('21:00');
@@ -198,7 +209,13 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     return `${year}-${month}-${day}`;
   };
 
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(isLeader ? 1 : 0);
+
+  useEffect(() => {
+    if (isLeader) {
+      setActiveTab(1);
+    }
+  }, [isLeader]);
   const [attendanceDate, setAttendanceDate] = useState(getTodayDateStr());
   const [floorFilter, setFloorFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -228,7 +245,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
   const [justifyModal, setJustifyModal] = useState<JustifyModalState | null>(null);
 
   useEffect(() => {
-    fetchSchedule();
+    fetchSchedule(false);
     fetchTargets();
   }, [sessionKey]);
 
@@ -237,17 +254,23 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     if (activeTab === 2) fetchAbsentList();
     if (activeTab === 3) fetchTargets();
 
-    // Auto-poll live records every 3 seconds
+    // Auto-poll live records and session configurations every 3 seconds
     const pollInterval = setInterval(() => {
-      if (activeTab === 1 && !manualModal?.isOpen && !justifyModal?.isOpen) fetchAttendanceList();
-      if (activeTab === 2 && !manualModal?.isOpen && !justifyModal?.isOpen) fetchAbsentList();
+      if (activeTab === 1 && !manualModal?.isOpen && !justifyModal?.isOpen) {
+        fetchAttendanceList();
+        fetchSchedule(true);
+      }
+      if (activeTab === 2 && !manualModal?.isOpen && !justifyModal?.isOpen) {
+        fetchAbsentList();
+        fetchSchedule(true);
+      }
     }, 3000);
 
     return () => clearInterval(pollInterval);
   }, [activeTab, attendanceDate, absentDate, sessionKey, manualModal?.isOpen, justifyModal?.isOpen]);
 
-  const fetchSchedule = async () => {
-    setLoading(true);
+  const fetchSchedule = async (silent: boolean = false) => {
+    if (!silent) setLoading(true);
     try {
       const [res, allRes] = await Promise.all([
         apiClient.get(`/attendance/schedule?type=${sessionKey}`),
@@ -519,10 +542,33 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
     }
   };
 
+  const [deletingAttendance, setDeletingAttendance] = useState(false);
+
   const exportAttendanceCSV = () => {
     const token = localStorage.getItem('admin_token');
     const baseUrl = apiClient.defaults.baseURL || '/api';
     window.open(`${baseUrl}/attendance/export?type=${sessionKey}&date=${attendanceDate}&token=${token}`, '_blank');
+  };
+
+  const handleDeleteAllAttendance = async () => {
+    const confirmMsg = `⚠️ ARE YOU SURE?\n\nThis will permanently delete all attendance records for "${sessionName || sessionKey}" on ${attendanceDate} for all students.\n\nThis action cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingAttendance(true);
+    try {
+      const res = await apiClient.delete(`/attendance/session/${sessionKey}/records?date=${attendanceDate}`);
+      if (res.data.success) {
+        alert(res.data.message || 'Attendance records deleted successfully.');
+        fetchAttendanceList();
+        if (activeTab === 2) fetchAbsentList();
+      } else {
+        alert(res.data.message || 'Failed to delete attendance records.');
+      }
+    } catch (e: any) {
+      alert(e.response?.data?.message || 'Failed to delete attendance records.');
+    } finally {
+      setDeletingAttendance(false);
+    }
   };
 
   const fetchAttendanceList = async () => {
@@ -727,60 +773,102 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 🎯 Selective Session ({selectedTargetIds.length} Assigned)
               </span>
             )}
+            {isViewOnly && (
+              <span style={{
+                padding: '3px 10px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 700,
+                backgroundColor: '#eff6ff',
+                color: '#2563eb',
+                border: '1px solid #bfdbfe',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                👁️ View Only Mode
+              </span>
+            )}
           </div>
           <p style={{ margin: '4px 0 0 0' }}>Set the time window and manage student assignments & live attendance.</p>
         </div>
-        <div className="header-action-group">
-          <button className="header-action-btn edit" onClick={editSession} title="Rename Session">
-            <Edit2 size={15} /> Edit Name
-          </button>
-          <button className="header-action-btn delete" onClick={deleteSession} title="Delete Session">
-            <Trash2 size={15} /> Delete Session
-          </button>
-        </div>
+        {!isLeader && (
+          <div className="header-action-group">
+            <button className="header-action-btn edit" onClick={editSession} title="Rename Session">
+              <Edit2 size={15} /> Edit Name
+            </button>
+            <button className="header-action-btn delete" onClick={deleteSession} title="Delete Session">
+              <Trash2 size={15} /> Delete Session
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="tabs-navigation">
-        <button
-          className={`tab-nav-btn ${activeTab === 0 ? 'active' : ''}`}
-          onClick={() => setActiveTab(0)}
-        >
-          Set Timing
-        </button>
-        <button
-          className={`tab-nav-btn ${activeTab === 1 ? 'active' : ''}`}
-          onClick={() => setActiveTab(1)}
-        >
-          View Attendance
-        </button>
-        <button
-          className={`tab-nav-btn ${activeTab === 2 ? 'active' : ''}`}
-          onClick={() => setActiveTab(2)}
-        >
-          Report Verification
-        </button>
-        <button
-          className={`tab-nav-btn ${activeTab === 3 ? 'active' : ''}`}
-          onClick={() => setActiveTab(3)}
-          style={{ position: 'relative' }}
-        >
-          <span>Student Assignment</span>
-          {!isForAllStudents && (
-            <span style={{
-              marginLeft: '6px',
-              padding: '2px 7px',
-              fontSize: '11px',
-              fontWeight: 800,
-              borderRadius: '10px',
-              backgroundColor: '#f59e0b',
-              color: '#ffffff'
-            }}>
-              {selectedTargetIds.length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* View Only Alert Banner */}
+      {isViewOnly && (
+        <div style={{
+          backgroundColor: '#eff6ff',
+          border: '1.5px solid #bfdbfe',
+          color: '#1e40af',
+          padding: '12px 18px',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginBottom: '18px',
+          fontWeight: 600,
+          fontSize: '13px'
+        }}>
+          <AlertCircle size={20} color="#3b82f6" style={{ flexShrink: 0 }} />
+          <div>
+            <strong style={{ color: '#1d4ed8' }}>Read-Only Access:</strong> You are assigned view-only permissions for {sessionName || sessionKey}. Modifying timings, changing target assignments, marking attendance, deleting records, and sending WhatsApp broadcasts are disabled.
+          </div>
+        </div>
+      )}
+
+      {/* Tabs (Hidden for Floor Leaders - Leaders only see View Attendance) */}
+      {!isLeader && (
+        <div className="tabs-navigation">
+          <button
+            className={`tab-nav-btn ${activeTab === 0 ? 'active' : ''}`}
+            onClick={() => setActiveTab(0)}
+          >
+            Set Timing
+          </button>
+          <button
+            className={`tab-nav-btn ${activeTab === 1 ? 'active' : ''}`}
+            onClick={() => setActiveTab(1)}
+          >
+            View Attendance
+          </button>
+          <button
+            className={`tab-nav-btn ${activeTab === 2 ? 'active' : ''}`}
+            onClick={() => setActiveTab(2)}
+          >
+            Report Verification
+          </button>
+          <button
+            className={`tab-nav-btn ${activeTab === 3 ? 'active' : ''}`}
+            onClick={() => setActiveTab(3)}
+            style={{ position: 'relative' }}
+          >
+            <span>Student Assignment</span>
+            {!isForAllStudents && (
+              <span style={{
+                marginLeft: '6px',
+                padding: '2px 7px',
+                fontSize: '11px',
+                fontWeight: 800,
+                borderRadius: '10px',
+                backgroundColor: '#f59e0b',
+                color: '#ffffff'
+              }}>
+                {selectedTargetIds.length}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* TAB 0: TIMING CONTROLS */}
       {activeTab === 0 && (
@@ -985,11 +1073,23 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
             </div>
 
             <div className="timing-actions-row">
-              <button className="btn-start-timing" onClick={saveSchedule} disabled={saving}>
+              <button 
+                className="btn-start-timing" 
+                onClick={saveSchedule} 
+                disabled={saving || isViewOnly}
+                title={isViewOnly ? 'Disabled in View Only mode' : 'Start / Save Attendance'}
+                style={isViewOnly ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+              >
                 <Play size={18} /> {saving ? 'Saving...' : 'Start / Save Attendance'}
               </button>
 
-              <button className="btn-stop-timing" onClick={stopAttendance} disabled={saving}>
+              <button 
+                className="btn-stop-timing" 
+                onClick={stopAttendance} 
+                disabled={saving || isViewOnly}
+                title={isViewOnly ? 'Disabled in View Only mode' : 'Stop immediately'}
+                style={isViewOnly ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+              >
                 <Square size={18} /> Stop Immediately
               </button>
             </div>
@@ -1415,7 +1515,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 <button
                   type="button"
                   onClick={sendInstantSessionAlerts}
-                  disabled={sendingAlerts || !Object.values(alertsConfig).some(c => c.enabled)}
+                  disabled={sendingAlerts || isViewOnly || !Object.values(alertsConfig).some(c => c.enabled)}
                   style={{
                     padding: '10px 18px',
                     borderRadius: '10px',
@@ -1423,13 +1523,14 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                     background: '#ecfdf5',
                     color: '#065f46',
                     fontWeight: 700,
-                    cursor: (sendingAlerts || !Object.values(alertsConfig).some(c => c.enabled)) ? 'not-allowed' : 'pointer',
+                    cursor: (sendingAlerts || isViewOnly || !Object.values(alertsConfig).some(c => c.enabled)) ? 'not-allowed' : 'pointer',
                     fontSize: '13px',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    opacity: !Object.values(alertsConfig).some(c => c.enabled) ? 0.6 : 1
+                    opacity: (isViewOnly || !Object.values(alertsConfig).some(c => c.enabled)) ? 0.5 : 1
                   }}
+                  title={isViewOnly ? 'Disabled in View Only mode' : undefined}
                 >
                   <Send size={15} /> {sendingAlerts ? 'Sending Alerts...' : 'Send Session Alerts Now'}
                 </button>
@@ -1437,7 +1538,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 <button
                   type="button"
                   onClick={saveSchedule}
-                  disabled={saving}
+                  disabled={saving || isViewOnly}
                   style={{
                     padding: '10px 22px',
                     borderRadius: '10px',
@@ -1445,10 +1546,12 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                     background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
                     color: '#ffffff',
                     fontWeight: 700,
-                    cursor: saving ? 'not-allowed' : 'pointer',
+                    cursor: (saving || isViewOnly) ? 'not-allowed' : 'pointer',
                     fontSize: '13px',
-                    boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)'
+                    boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                    opacity: isViewOnly ? 0.5 : 1
                   }}
+                  title={isViewOnly ? 'Disabled in View Only mode' : undefined}
                 >
                   {saving ? 'Saving...' : 'Save Schedule & Alerts'}
                 </button>
@@ -1504,6 +1607,33 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
               <Download size={14} /> Export CSV
             </button>
 
+            {!isLeader && (
+              <button 
+                type="button"
+                onClick={handleDeleteAllAttendance}
+                disabled={deletingAttendance}
+                title="Delete all attendance records for this session on this date"
+                style={{ 
+                  padding: '8px 14px', 
+                  fontSize: '13px',
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  cursor: deletingAttendance ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.25)',
+                  transition: 'all 0.2s',
+                  opacity: deletingAttendance ? 0.7 : 1
+                }}
+              >
+                <Trash2 size={14} /> {deletingAttendance ? 'Deleting...' : 'Delete Attendance'}
+              </button>
+            )}
+
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#10b981', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
               Live Sync ({filteredAttendance.length})
@@ -1518,7 +1648,9 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 <th style={{ padding: '12px 14px' }}>Floor / Room</th>
                 <th style={{ padding: '12px 14px' }}>Status</th>
                 <th style={{ padding: '12px 14px' }}>Notes / Remarks</th>
-                <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
+                {!isViewOnly && (
+                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -1572,32 +1704,34 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                       color="#475569"
                     />
                   </td>
-                  <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                    <button
-                      onClick={() => openManualModal(s)}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: s.status === 'Absent' ? '#e0e7ff' : '#f1f5f9',
-                        color: s.status === 'Absent' ? '#4338ca' : '#334155',
-                        border: '1px solid ' + (s.status === 'Absent' ? '#c7d2fe' : '#cbd5e1'),
-                        borderRadius: '8px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <UserCheck size={14} />
-                      {s.status === 'Absent' ? 'Mark Manual' : 'Edit Mark'}
-                    </button>
-                  </td>
+                  {!isViewOnly && (
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <button
+                        onClick={() => openManualModal(s)}
+                        style={{
+                          padding: '6px 14px',
+                          backgroundColor: s.status === 'Absent' ? '#e0e7ff' : '#f1f5f9',
+                          color: s.status === 'Absent' ? '#4338ca' : '#334155',
+                          border: '1px solid ' + (s.status === 'Absent' ? '#c7d2fe' : '#cbd5e1'),
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <UserCheck size={14} />
+                        {s.status === 'Absent' ? 'Mark Manual' : 'Edit Mark'}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
               {filteredAttendance.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={isViewOnly ? 5 : 6} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
                     No students match the criteria for {attendanceDate}.
                   </td>
                 </tr>
@@ -1664,7 +1798,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 <th style={{ padding: '12px 14px' }}>Name</th>
                 <th style={{ padding: '12px 14px' }}>Floor / Room</th>
                 <th style={{ padding: '12px 14px' }}>Justification Reason</th>
-                <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
+                {!isViewOnly && <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -1707,49 +1841,51 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                       <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>Unjustified</span>
                     )}
                   </td>
-                  <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '8px' }}>
-                      <button
-                        onClick={() => openJustifyModal(s)}
-                        style={{
-                          padding: '6px 14px',
-                          backgroundColor: '#ffffff',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '8px',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          color: '#3b82f6',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px'
-                        }}
-                      >
-                        <FileText size={14} /> Justify
-                      </button>
+                  {!isViewOnly && (
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '8px' }}>
+                        <button
+                          onClick={() => openJustifyModal(s)}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            color: '#3b82f6',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <FileText size={14} /> Justify
+                        </button>
 
-                      <button
-                        onClick={() => openManualModal({ ...s, status: 'Absent' })}
-                        style={{
-                          padding: '6px 14px',
-                          backgroundColor: '#e0e7ff',
-                          color: '#4338ca',
-                          border: '1px solid #c7d2fe',
-                          borderRadius: '8px',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          fontSize: '12px'
-                        }}
-                      >
-                        Mark Manual
-                      </button>
-                    </div>
-                  </td>
+                        <button
+                          onClick={() => openManualModal({ ...s, status: 'Absent' })}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#e0e7ff',
+                            color: '#4338ca',
+                            border: '1px solid #c7d2fe',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontSize: '12px'
+                          }}
+                        >
+                          Mark Manual
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
               {filteredAbsent.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={isViewOnly ? 4 : 5} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
                     No absent students match the criteria for {absentDate}.
                   </td>
                 </tr>
@@ -1911,7 +2047,7 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
 
             <button
               type="button"
-              disabled={savingTargets}
+              disabled={savingTargets || isViewOnly}
               onClick={saveAssignedTargets}
               style={{
                 display: 'inline-flex',
@@ -1924,10 +2060,12 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                 borderRadius: '10px',
                 fontWeight: 700,
                 fontSize: '14px',
-                cursor: savingTargets ? 'not-allowed' : 'pointer',
+                cursor: (savingTargets || isViewOnly) ? 'not-allowed' : 'pointer',
                 boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                opacity: isViewOnly ? 0.5 : 1
               }}
+              title={isViewOnly ? 'Disabled in View Only mode' : undefined}
             >
               <Check size={16} />
               <span>{savingTargets ? 'Saving Assignments...' : `Save Assigned Students (${selectedTargetIds.length})`}</span>
@@ -1954,11 +2092,11 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                   return (
                     <tr
                       key={`target_row_${student.student_id}`}
-                      onClick={() => toggleStudentTarget(student.student_id)}
+                      onClick={() => !isViewOnly && toggleStudentTarget(student.student_id)}
                       style={{
                         borderBottom: '1px solid #f1f5f9',
                         backgroundColor: isAssigned ? '#f5f3ff' : '#ffffff',
-                        cursor: 'pointer',
+                        cursor: isViewOnly ? 'default' : 'pointer',
                         transition: 'background-color 0.15s'
                       }}
                     >
@@ -1966,12 +2104,13 @@ export const LiveAttendanceManager: React.FC<{ sessionKey: string; onSessionDele
                         <input
                           type="checkbox"
                           checked={isAssigned}
-                          onChange={() => toggleStudentTarget(student.student_id)}
+                          disabled={isViewOnly}
+                          onChange={() => !isViewOnly && toggleStudentTarget(student.student_id)}
                           style={{
                             width: '18px',
                             height: '18px',
                             accentColor: '#4f46e5',
-                            cursor: 'pointer'
+                            cursor: isViewOnly ? 'default' : 'pointer'
                           }}
                         />
                       </td>

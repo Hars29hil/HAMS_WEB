@@ -32,7 +32,7 @@ async function verifyStudent(req, res, next) {
   }
 }
 
-function verifyFloorLeader(req, res, next) {
+async function verifyFloorLeader(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, message: 'Missing token' });
@@ -43,7 +43,55 @@ function verifyFloorLeader(req, res, next) {
     if (decoded.role !== 'floor_leader') {
       return res.status(403).json({ success: false, message: 'Not a floor leader token' });
     }
-    req.leader = decoded; // { id, floor_id, role }
+
+    // Fetch live permissions and assigned data directly from DB
+    if (decoded.id && decoded.id !== 99999) {
+      try {
+        const [rows] = await pool.query('SELECT * FROM floor_leaders WHERE id = ?', [decoded.id]);
+        if (rows.length === 0 || rows[0].is_active === 0) {
+          return res.status(401).json({ success: false, message: 'Leader account not found or inactive.' });
+        }
+        const leader = rows[0];
+        let sessionPermissions = {};
+        if (leader.session_permissions) {
+          try {
+            sessionPermissions = typeof leader.session_permissions === 'string' ? JSON.parse(leader.session_permissions) : leader.session_permissions;
+          } catch(e) {
+            sessionPermissions = {};
+          }
+        }
+        let assignedFloors = [];
+        if (leader.assigned_floors) {
+          try {
+            assignedFloors = typeof leader.assigned_floors === 'string' ? JSON.parse(leader.assigned_floors) : leader.assigned_floors;
+          } catch(e) {
+            assignedFloors = [leader.floor_id];
+          }
+        } else {
+          assignedFloors = [leader.floor_id];
+        }
+        let assignedSessions = ['all'];
+        if (leader.assigned_sessions) {
+          try {
+            assignedSessions = typeof leader.assigned_sessions === 'string' ? JSON.parse(leader.assigned_sessions) : leader.assigned_sessions;
+          } catch(e) {
+            assignedSessions = ['all'];
+          }
+        }
+        req.leader = {
+          ...decoded,
+          floor_id: assignedFloors[0] || leader.floor_id,
+          assigned_floors: assignedFloors,
+          assigned_sessions: assignedSessions,
+          session_permissions: sessionPermissions
+        };
+      } catch (dbErr) {
+        req.leader = decoded;
+      }
+    } else {
+      req.leader = decoded;
+    }
+
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
@@ -68,7 +116,7 @@ function verifyAdmin(req, res, next) {
   }
 }
 
-function verifyAdminOrFloorLeader(req, res, next) {
+async function verifyAdminOrFloorLeader(req, res, next) {
   let token;
   const header = req.headers.authorization;
   if (header && header.startsWith('Bearer ')) {
@@ -88,7 +136,52 @@ function verifyAdminOrFloorLeader(req, res, next) {
     if (decoded.role === 'admin') {
       req.admin = decoded;
     } else {
-      req.leader = decoded;
+      if (decoded.id && decoded.id !== 99999) {
+        try {
+          const [rows] = await pool.query('SELECT * FROM floor_leaders WHERE id = ?', [decoded.id]);
+          if (rows.length === 0 || rows[0].is_active === 0) {
+            return res.status(401).json({ success: false, message: 'Leader account not found or inactive.' });
+          }
+          const leader = rows[0];
+          let sessionPermissions = {};
+          if (leader.session_permissions) {
+            try {
+              sessionPermissions = typeof leader.session_permissions === 'string' ? JSON.parse(leader.session_permissions) : leader.session_permissions;
+            } catch(e) {
+              sessionPermissions = {};
+            }
+          }
+          let assignedFloors = [];
+          if (leader.assigned_floors) {
+            try {
+              assignedFloors = typeof leader.assigned_floors === 'string' ? JSON.parse(leader.assigned_floors) : leader.assigned_floors;
+            } catch(e) {
+              assignedFloors = [leader.floor_id];
+            }
+          } else {
+            assignedFloors = [leader.floor_id];
+          }
+          let assignedSessions = ['all'];
+          if (leader.assigned_sessions) {
+            try {
+              assignedSessions = typeof leader.assigned_sessions === 'string' ? JSON.parse(leader.assigned_sessions) : leader.assigned_sessions;
+            } catch(e) {
+              assignedSessions = ['all'];
+            }
+          }
+          req.leader = {
+            ...decoded,
+            floor_id: assignedFloors[0] || leader.floor_id,
+            assigned_floors: assignedFloors,
+            assigned_sessions: assignedSessions,
+            session_permissions: sessionPermissions
+          };
+        } catch (dbErr) {
+          req.leader = decoded;
+        }
+      } else {
+        req.leader = decoded;
+      }
     }
     next();
   } catch (err) {

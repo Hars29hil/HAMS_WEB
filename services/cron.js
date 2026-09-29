@@ -167,7 +167,7 @@ cron.schedule('* * * * *', async () => {
 
             // Fetch attendance records for this date
             const [records] = await pool.query(`
-              SELECT ar.student_id, TRIM(LEADING '0' FROM ar.bank_code) as clean_bank_code, ar.bank_code, ar.created_at, ar.status as record_status
+              SELECT TRIM(LEADING '0' FROM ar.bank_code) as clean_bank_code, ar.bank_code, ar.marked_at, ar.is_late
               FROM attendance_records ar
               JOIN attendance_sessions ses ON ar.session_id = ses.id
               WHERE (ses.session_date = ? OR DATE(ses.session_date) = ?) AND LOWER(ses.session_type) = LOWER(?)
@@ -175,7 +175,6 @@ cron.schedule('* * * * *', async () => {
 
             const recordMap = new Map();
             records.forEach(r => {
-              if (r.student_id) recordMap.set(String(r.student_id), r);
               if (r.clean_bank_code) recordMap.set(String(r.clean_bank_code), r);
               if (r.bank_code) recordMap.set(String(r.bank_code).trim(), r);
             });

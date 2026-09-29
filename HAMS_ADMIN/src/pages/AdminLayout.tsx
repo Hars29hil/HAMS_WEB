@@ -27,6 +27,10 @@ export const AdminLayout: React.FC = () => {
 
   useEffect(() => {
     fetchSessions();
+    const interval = setInterval(() => {
+      fetchSessions();
+    }, 4000);
+    return () => clearInterval(interval);
   }, [location.pathname]);
 
   const fetchSessions = async () => {
@@ -57,7 +61,7 @@ export const AdminLayout: React.FC = () => {
       return { title: 'Student Management', subtitle: 'Manage active students, floor & room assignments' };
     }
     if (p === '/leaders') {
-      return { title: 'Floor Leaders Management', subtitle: 'Create, assign multiple floors, and manage floor leaders' };
+      return { title: 'User Credentials Management', subtitle: 'Create, assign multiple floors, and manage user login credentials' };
     }
     if (p === '/messages') {
       return { title: 'WhatsApp Automation', subtitle: 'Broadcast real-time attendance alerts to students' };
@@ -97,7 +101,7 @@ export const AdminLayout: React.FC = () => {
           subtitle={headerInfo.subtitle}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         />
-        <div style={{ flex: 1, padding: '24px' }}>
+        <div className="admin-view-content-wrapper">
           <Routes>
             <Route path="/" element={<DashboardOverview />} />
             <Route path="/dashboard" element={<DashboardOverview />} />

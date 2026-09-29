@@ -192,7 +192,26 @@ router.get('/', async (req, res) => {
     await syncStudentsFromApi();
 
     // 2. Fetch all active students
-    let query = 'SELECT id AS student_id, name, floor_id, student_code, phone_number, assigned_mobile, room_number, is_default_present, father_phone, mother_phone, parent_phone FROM students WHERE is_active = TRUE';
+    let query = `
+      SELECT 
+        id AS student_id, 
+        name, 
+        floor_id, 
+        student_code, 
+        phone_number, 
+        assigned_mobile, 
+        room_number, 
+        is_default_present, 
+        father_phone, 
+        mother_phone, 
+        parent_phone,
+        last_known_ip,
+        device_uuid,
+        last_login_at,
+        is_device_bound
+      FROM students 
+      WHERE is_active = TRUE
+    `;
     let params = [];
     if (req.leader) {
       const leaderFloors = Array.isArray(req.leader.assigned_floors) && req.leader.assigned_floors.length > 0
@@ -228,19 +247,44 @@ router.get('/', async (req, res) => {
       }
 
       const [bindingRows] = await pool.query(`
-        SELECT student_id, ip_address, last_login_at
+        SELECT student_id, student_code, ip_address, device_uuid, last_login_at
         FROM device_ip_bindings
       `);
       const ipMap = {};
+      const devMap = {};
+      const lastLoginMap = {};
       for (const b of bindingRows) {
-        ipMap[b.student_id] = b.ip_address;
+        if (b.student_id) {
+          ipMap[b.student_id] = b.ip_address;
+          devMap[b.student_id] = b.device_uuid;
+          lastLoginMap[b.student_id] = b.last_login_at;
+        }
+        if (b.student_code) {
+          ipMap[b.student_code] = b.ip_address;
+          devMap[b.student_code] = b.device_uuid;
+          lastLoginMap[b.student_code] = b.last_login_at;
+          const cleanCode = String(b.student_code).replace(/^0+/, '');
+          ipMap[cleanCode] = b.ip_address;
+          devMap[cleanCode] = b.device_uuid;
+          lastLoginMap[cleanCode] = b.last_login_at;
+        }
       }
 
-      const enrichedStudents = students.map(s => ({
-        ...s,
-        bound_ip: ipMap[s.student_id] || null,
-        tags: tagsMap[s.student_id] || []
-      }));
+      const enrichedStudents = students.map(s => {
+        const cleanCode = String(s.student_code || '').replace(/^0+/, '');
+        const boundIp = ipMap[s.student_id] || ipMap[s.student_code] || ipMap[cleanCode] || s.last_known_ip || null;
+        const deviceUuid = devMap[s.student_id] || devMap[s.student_code] || devMap[cleanCode] || s.device_uuid || null;
+        const lastLogin = lastLoginMap[s.student_id] || lastLoginMap[s.student_code] || lastLoginMap[cleanCode] || s.last_login_at || null;
+
+        return {
+          ...s,
+          bound_ip: boundIp,
+          last_known_ip: boundIp,
+          device_uuid: deviceUuid,
+          last_login_at: lastLogin,
+          tags: tagsMap[s.student_id] || []
+        };
+      });
 
       return res.json({ success: true, data: enrichedStudents });
     } catch(tagErr) {
@@ -296,16 +340,166 @@ router.get('/details/:code', async (req, res) => {
       WHERE sta.student_id = ?
     `, [student.id]);
 
-    // Fetch attendance stats
+    // Fetch session schedules and attendance breakdown
+    let sessionStats = [];
+    let overallStats = { total_held: 0, total_attended: 0, percentage: 0 };
     let totalAttended = 0;
     try {
-      const [attRows] = await pool.query(`
-        SELECT COUNT(*) as total 
-        FROM attendance_records 
-        WHERE student_id = ? OR TRIM(LEADING '0' FROM bank_code) = TRIM(LEADING '0' FROM ?)
-      `, [student.id, student.student_code]);
-      totalAttended = attRows[0]?.total || 0;
-    } catch (e) {}
+      // 1. Get all schedules
+      let schedules = [];
+      try {
+        const [schedRows] = await pool.query('SELECT session_key, session_name, icon_name FROM attendance_schedules ORDER BY start_time ASC');
+        schedules = schedRows || [];
+      } catch (e) {}
+
+      if (schedules.length === 0) {
+        schedules = [
+          { session_key: 'night', session_name: 'Night Attendance', icon_name: 'moon' },
+          { session_key: 'aarti', session_name: 'Aarti Session', icon_name: 'sun' },
+          { session_key: 'weekly_assembly', session_name: 'Weekly Assembly', icon_name: 'users' }
+        ];
+      }
+
+      // 2. Count total sessions held per session_type
+      const [totalHeldRows] = await pool.query(`
+        SELECT LOWER(TRIM(session_type)) as session_type, COUNT(*) as total_held
+        FROM attendance_sessions
+        GROUP BY LOWER(TRIM(session_type))
+      `);
+      const totalHeldMap = {};
+      let totalSessionsCount = 0;
+      for (const r of totalHeldRows || []) {
+        if (r.session_type) {
+          totalHeldMap[r.session_type] = r.total_held || 0;
+          totalSessionsCount += (r.total_held || 0);
+        }
+      }
+
+      // 3. Count attended sessions per session_type for this student
+      const cleanCode = String(student.student_code || '').replace(/^0+/, '');
+      const [attendedRows] = await pool.query(`
+        SELECT LOWER(TRIM(ses.session_type)) as session_type, COUNT(DISTINCT ar.session_id) as attended_count
+        FROM attendance_records ar
+        JOIN attendance_sessions ses ON ar.session_id = ses.id
+        WHERE ar.student_id = ? 
+           OR ar.bank_code = ? 
+           OR TRIM(LEADING '0' FROM ar.bank_code) = ?
+        GROUP BY LOWER(TRIM(ses.session_type))
+      `, [student.id, student.student_code, cleanCode]);
+
+      const attendedMap = {};
+      let totalStudentAttended = 0;
+      for (const r of attendedRows || []) {
+        if (r.session_type) {
+          attendedMap[r.session_type] = r.attended_count || 0;
+          totalStudentAttended += (r.attended_count || 0);
+        }
+      }
+
+      totalAttended = totalStudentAttended;
+
+      const seenKeys = new Set();
+      for (const s of schedules) {
+        const key = (s.session_key || '').toLowerCase().trim();
+        seenKeys.add(key);
+        const held = totalHeldMap[key] || 0;
+        const attended = attendedMap[key] || 0;
+        const percentage = held > 0 ? Math.round((attended / held) * 100) : 0;
+        sessionStats.push({
+          session_key: s.session_key,
+          session_name: s.session_name,
+          icon_name: s.icon_name || 'users',
+          held,
+          attended,
+          percentage
+        });
+      }
+
+      for (const key of Object.keys(totalHeldMap)) {
+        if (!seenKeys.has(key)) {
+          const held = totalHeldMap[key] || 0;
+          const attended = attendedMap[key] || 0;
+          const percentage = held > 0 ? Math.round((attended / held) * 100) : 0;
+          const formattedName = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          sessionStats.push({
+            session_key: key,
+            session_name: formattedName,
+            icon_name: 'calendar',
+            held,
+            attended,
+            percentage
+          });
+        }
+      }
+
+      overallStats = {
+        total_held: totalSessionsCount,
+        total_attended: totalStudentAttended,
+        percentage: totalSessionsCount > 0 ? Math.round((totalStudentAttended / totalSessionsCount) * 100) : 0
+      };
+    } catch (attErr) {
+      console.warn('Error computing student session attendance stats:', attErr.message);
+    }
+
+    // Fetch Security / Rule violation logs (Cross-Device IP conflicts, unauthorized login attempts)
+    let securityLogs = [];
+    const cleanCode = String(student.student_code || '').replace(/^0+/, '');
+    try {
+      const [secRows] = await pool.query(`
+        SELECT 
+          id,
+          event_type,
+          status,
+          ip_address,
+          device_uuid,
+          details,
+          primary_student_id,
+          primary_student_code,
+          primary_student_name,
+          attempted_student_id,
+          attempted_student_code,
+          attempted_student_name,
+          resolved_by,
+          resolved_at,
+          attempted_at
+        FROM device_ip_security_logs
+        WHERE primary_student_id = ?
+           OR attempted_student_id = ?
+           OR TRIM(LEADING '0' FROM primary_student_code) = ?
+           OR TRIM(LEADING '0' FROM attempted_student_code) = ?
+        ORDER BY attempted_at DESC
+        LIMIT 20
+      `, [student.id, student.id, cleanCode, cleanCode]);
+      securityLogs = secRows || [];
+    } catch (secErr) {
+      console.warn('Error fetching security logs for student:', secErr.message);
+    }
+
+    // Fetch AI behavioral tag audit logs
+    let aiAuditLogs = [];
+    try {
+      const [aiRows] = await pool.query(`
+        SELECT id, assigned_tag, reason, analyzed_days, analyzed_at
+        FROM ai_tag_analysis_logs
+        WHERE student_id = ?
+        ORDER BY analyzed_at DESC
+        LIMIT 10
+      `, [student.id]);
+      aiAuditLogs = aiRows || [];
+    } catch (aiErr) {}
+
+    // Fetch absent reasons / disciplinary records
+    let absentRecords = [];
+    try {
+      const [absRows] = await pool.query(`
+        SELECT id, session_date, reason, created_at
+        FROM attendance_absent_reasons
+        WHERE student_id = ?
+        ORDER BY session_date DESC
+        LIMIT 10
+      `, [student.id]);
+      absentRecords = absRows || [];
+    } catch (absErr) {}
 
     // Fetch bound IP address
     let boundIp = null;
@@ -345,7 +539,12 @@ router.get('/details/:code', async (req, res) => {
       bound_ip: boundIp,
       bound_ip_at: boundIpAt,
       tags: tags,
-      total_attended: totalAttended
+      total_attended: totalAttended,
+      session_stats: sessionStats,
+      overall_stats: overallStats,
+      security_logs: securityLogs,
+      ai_audit_logs: aiAuditLogs,
+      absent_records: absentRecords
     };
 
     return res.json({ success: true, data: details });
@@ -357,27 +556,83 @@ router.get('/details/:code', async (req, res) => {
 
 // ------------------------------------------------------------
 // DELETE /api/students/:id
+// Cascades: Deletes all attendance_records, absent justifications, leaves,
+// tag assignments, IP bindings, rebind requests, and student entry
 // ------------------------------------------------------------
 router.delete('/:id', async (req, res) => {
   try {
     const studentId = req.params.id;
     
+    // Find the student first to retrieve their student_code
+    const [students] = await pool.query('SELECT id, student_code, floor_id FROM students WHERE id = ?', [studentId]);
+    if (students.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    const student = students[0];
+
     // If it's a leader, ensure they can only delete students on their floor
     if (req.leader) {
-      const [students] = await pool.query('SELECT floor_id FROM students WHERE id = ?', [studentId]);
-      if (students.length === 0 || students[0].floor_id !== req.leader.floor_id) {
+      if (student.floor_id !== req.leader.floor_id) {
         return res.status(403).json({ success: false, message: 'Not authorized to delete this student' });
       }
     }
 
-    // Hard delete logic - first clean up constraints (rebind_requests)
-    await pool.query('DELETE FROM rebind_requests WHERE student_id = ?', [studentId]);
+    const code = student.student_code;
+
+    // 1. Delete all attendance records for this student
+    try {
+      await pool.query(
+        `DELETE FROM attendance_records 
+         WHERE bank_code = ? 
+            OR TRIM(LEADING '0' FROM bank_code) = TRIM(LEADING '0' FROM ?)
+            OR CAST(bank_code AS UNSIGNED) = CAST(? AS UNSIGNED)`,
+        [code, code, code]
+      );
+    } catch(e) {
+      console.warn('Student attendance_records cleanup warning:', e.message);
+    }
+
+    // 2. Delete all absent reasons / justifications
+    try {
+      await pool.query('DELETE FROM attendance_absent_reasons WHERE student_id = ?', [studentId]);
+    } catch(e) {}
+
+    // 3. Delete student leaves
+    try {
+      await pool.query(
+        `DELETE FROM student_leaves 
+         WHERE student_id = ? 
+            OR bank_code = ? 
+            OR TRIM(LEADING '0' FROM bank_code) = TRIM(LEADING '0' FROM ?)`,
+        [studentId, code, code]
+      );
+    } catch(e) {}
+
+    // 4. Delete student tag assignments
+    try {
+      await pool.query('DELETE FROM student_tag_assignments WHERE student_id = ?', [studentId]);
+    } catch(e) {}
+
+    // 5. Delete device IP bindings & logs
+    try {
+      await pool.query('DELETE FROM device_ip_bindings WHERE student_id = ?', [studentId]);
+    } catch(e) {}
+    try {
+      await pool.query('DELETE FROM device_ip_login_logs WHERE student_id = ?', [studentId]);
+    } catch(e) {}
+
+    // 6. Delete rebind requests
+    try {
+      await pool.query('DELETE FROM rebind_requests WHERE student_id = ?', [studentId]);
+    } catch(e) {}
+
+    // 7. Delete student row
     await pool.query('DELETE FROM students WHERE id = ?', [studentId]);
     
-    return res.json({ success: true, message: 'Student deleted successfully' });
+    return res.json({ success: true, message: 'Student and all associated attendance data deleted successfully' });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Error deleting student:', err);
+    return res.status(500).json({ success: false, message: 'Server error: ' + (err.sqlMessage || err.message) });
   }
 });
 
@@ -517,27 +772,44 @@ router.put('/:id/default-attendance', async (req, res) => {
 // ------------------------------------------------------------
 router.post('/:id/reset-ip', async (req, res) => {
   try {
-    const studentId = req.params.id;
+    const studentIdentifier = req.params.id;
+    const cleanIdentifier = String(studentIdentifier).replace(/^0+/, '');
 
-    // 1. Get student info
-    const [students] = await pool.query('SELECT id, name, student_code FROM students WHERE id = ?', [studentId]);
+    // 1. Get student info by ID or student_code
+    const [students] = await pool.query(
+      `SELECT id, name, student_code FROM students 
+       WHERE id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+      [studentIdentifier, studentIdentifier, cleanIdentifier]
+    );
+
     if (students.length === 0) {
       return res.status(404).json({ success: false, message: 'Student not found' });
     }
     const student = students[0];
+    const sId = student.id;
+    const sCode = student.student_code;
+    const cleanCode = String(sCode).replace(/^0+/, '');
 
     // 2. Remove IP bindings for this student
-    await pool.query('DELETE FROM device_ip_bindings WHERE student_id = ?', [studentId]);
+    await pool.query(
+      `DELETE FROM device_ip_bindings 
+       WHERE student_id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+      [sId, sCode, cleanCode]
+    );
 
-    // 3. Clear device_uuid in students table so they can bind a new phone/browser
-    await pool.query('UPDATE students SET device_uuid = NULL WHERE id = ?', [studentId]);
+    // 3. Clear device_uuid and IP in students table so they can bind a new phone/browser
+    await pool.query(
+      `UPDATE students SET device_uuid = NULL, last_known_ip = NULL, is_device_bound = FALSE 
+       WHERE id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+      [sId, sCode, cleanCode]
+    );
 
     // 4. Resolve any security logs
     await pool.query(
       `UPDATE device_ip_security_logs 
        SET status = 'RESOLVED', resolved_by = ?, resolved_at = NOW() 
-       WHERE attempted_student_id = ? OR primary_student_id = ?`,
-      [req.admin ? 'ADMIN' : (req.leader?.username || 'ADMIN'), studentId, studentId]
+       WHERE attempted_student_id = ? OR primary_student_id = ? OR attempted_student_code = ? OR primary_student_code = ?`,
+      [req.admin ? 'ADMIN' : (req.leader?.username || 'ADMIN'), sId, sId, sCode, sCode]
     );
 
     return res.json({
@@ -550,11 +822,26 @@ router.post('/:id/reset-ip', async (req, res) => {
   }
 });
 
+// Also support POST /api/students/api/students/:id/reset-ip as fallback
+router.post('/api/students/:id/reset-ip', async (req, res, next) => {
+  req.url = `/${req.params.id}/reset-ip`;
+  return router.handle(req, res, next);
+});
+
 router.delete('/:id/ip', async (req, res) => {
   try {
-    const studentId = req.params.id;
-    await pool.query('DELETE FROM device_ip_bindings WHERE student_id = ?', [studentId]);
-    await pool.query('UPDATE students SET device_uuid = NULL WHERE id = ?', [studentId]);
+    const studentIdentifier = req.params.id;
+    const cleanIdentifier = String(studentIdentifier).replace(/^0+/, '');
+    const [students] = await pool.query(
+      `SELECT id, name, student_code FROM students 
+       WHERE id = ? OR student_code = ? OR TRIM(LEADING '0' FROM student_code) = ?`,
+      [studentIdentifier, studentIdentifier, cleanIdentifier]
+    );
+    const sId = students[0]?.id || studentIdentifier;
+    const sCode = students[0]?.student_code || studentIdentifier;
+
+    await pool.query('DELETE FROM device_ip_bindings WHERE student_id = ? OR student_code = ?', [sId, sCode]);
+    await pool.query('UPDATE students SET device_uuid = NULL, last_known_ip = NULL, is_device_bound = FALSE WHERE id = ? OR student_code = ?', [sId, sCode]);
     return res.json({ success: true, message: 'IP binding removed successfully' });
   } catch (err) {
     console.error('Error removing IP binding:', err);

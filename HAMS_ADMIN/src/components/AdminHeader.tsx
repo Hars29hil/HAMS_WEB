@@ -1,6 +1,7 @@
 import React from 'react';
-import { Menu, Bell, Shield, Radio, CheckCircle } from 'lucide-react';
+import { Menu, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import './AdminHeader.css';
 
 interface AdminHeaderProps {
   title: string;
@@ -18,40 +19,22 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   const { admin } = useAuth();
 
   return (
-    <header style={{
-      padding: '16px 32px',
-      backgroundColor: '#ffffff',
-      borderBottom: '1px solid var(--color-border)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      position: 'sticky',
-      top: 0,
-      zIndex: 30,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+    <header className="admin-header">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button
           onClick={onToggleSidebar}
-          style={{
-            display: 'none',
-            background: 'transparent',
-            border: 'none',
-            color: '#334155',
-            cursor: 'pointer',
-            padding: '6px',
-            borderRadius: '8px',
-          }}
+          aria-label="Toggle Menu"
           className="mobile-menu-btn"
         >
           <Menu size={22} />
         </button>
 
         <div>
-          <h1 style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.3px' }}>
+          <h1 className="header-title-text">
             {title}
           </h1>
           {subtitle && (
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '2px 0 0 0' }}>
+            <p className="header-subtitle-text">
               {subtitle}
             </p>
           )}

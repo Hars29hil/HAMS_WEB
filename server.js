@@ -18,6 +18,7 @@ const tagsRoutes = require('./routes/tags');
 const leadersRoutes = require('./routes/leaders');
 const leavesRoutes = require('./routes/leaves');
 const leaveService = require('./services/leaveService');
+const { ensureTablesExist } = require('./services/deviceSecurity');
 
 const app = express();
 app.set('trust proxy', true);
@@ -78,6 +79,7 @@ const pool = require('./config/db');
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_student TEXT DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_time TIME DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_message_audience VARCHAR(50) DEFAULT "absent"'); } catch(e) {}
+    try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN day_schedules JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN auto_alerts_config JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN last_auto_message_date DATE NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE attendance_schedules ADD COLUMN is_for_all_students BOOLEAN DEFAULT TRUE'); } catch(e) {}
@@ -109,6 +111,7 @@ const pool = require('./config/db');
     try { await pool.query('ALTER TABLE floor_leaders ADD COLUMN assigned_floors JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE floor_leaders ADD COLUMN assigned_sessions JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE floor_leaders ADD COLUMN is_active BOOLEAN DEFAULT TRUE'); } catch(e) {}
+    try { await pool.query('ALTER TABLE floor_leaders ADD COLUMN session_permissions JSON DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE floor_leaders MODIFY COLUMN phone_number VARCHAR(50) NULL'); } catch(e) {}
 
     // Floor Session Targets Migration
@@ -277,6 +280,8 @@ const pool = require('./config/db');
       `);
     } catch(e) {}
 
+    await ensureTablesExist();
+
     console.log('Database schema auto-migration successful.');
     // Trigger non-blocking leave sync
     leaveService.syncLeaves().catch(err => console.warn('Initial leave sync warning:', err.message));
@@ -353,6 +358,10 @@ app.get('/api/force-cleanup', async (req, res) => {
 // ------------------------------------------------------------
 app.get('/api/schedule-data', async (req, res) => {
   try {
+    const { resolveScheduleForDate, normalizeHHMM } = require('./utils/scheduleHelper');
+    const { getCurrentIST } = require('./utils/time');
+    const now = getCurrentIST();
+
     const includeInactive = req.query.all === 'true' || req.query.include_inactive === 'true';
     let query = 'SELECT * FROM attendance_schedules';
     if (!includeInactive) {
@@ -362,24 +371,32 @@ app.get('/api/schedule-data', async (req, res) => {
 
     const [rows] = await pool.query(query);
 
-    const formattedSessions = rows.map(r => ({
-      id: r.id,
-      session_key: r.session_key,
-      session_name: r.session_name,
-      start_time: r.start_time,
-      end_time: r.end_time,
-      late_time: r.late_time || null,
-      is_for_all_students: r.is_for_all_students !== undefined ? Boolean(r.is_for_all_students) : true,
-      icon_name: r.icon_name || 'moon',
-      is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
-      linked_session_key: r.linked_session_key || null,
-      auto_message: r.auto_message || null,
-      auto_message_time: r.auto_message_time || null,
-      auto_message_audience: r.auto_message_audience || 'all',
-      auto_message_student: r.auto_message_student || null,
-      auto_message_parent: r.auto_message_parent || null,
-      created_at: r.created_at
-    }));
+    const formattedSessions = rows.map(r => {
+      const resolved = resolveScheduleForDate(r, now);
+      let daySchedules = r.day_schedules;
+      if (typeof daySchedules === 'string') {
+        try { daySchedules = JSON.parse(daySchedules); } catch(e) { daySchedules = []; }
+      }
+      return {
+        id: r.id,
+        session_key: r.session_key,
+        session_name: r.session_name,
+        start_time: resolved.start_time || normalizeHHMM(r.start_time),
+        end_time: resolved.end_time || normalizeHHMM(r.end_time),
+        late_time: resolved.late_time || (r.late_time ? normalizeHHMM(r.late_time) : null),
+        day_schedules: Array.isArray(daySchedules) && daySchedules.length > 0 ? daySchedules : (resolved.day_schedules || []),
+        is_for_all_students: r.is_for_all_students !== undefined ? Boolean(r.is_for_all_students) : true,
+        icon_name: r.icon_name || 'users',
+        is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
+        linked_session_key: r.linked_session_key || null,
+        auto_message: r.auto_message || null,
+        auto_message_time: r.auto_message_time || null,
+        auto_message_audience: r.auto_message_audience || 'absent',
+        auto_message_student: r.auto_message_student || r.auto_message || null,
+        auto_message_parent: r.auto_message_parent || null,
+        created_at: r.created_at
+      };
+    });
 
     return res.json(formattedSessions);
   } catch (err) {

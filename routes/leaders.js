@@ -36,6 +36,21 @@ function parseSessions(sessions) {
   return ['all'];
 }
 
+// Helper to safely parse session permissions
+function parsePermissions(permissions) {
+  if (!permissions) return {};
+  if (typeof permissions === 'object' && permissions !== null && !Array.isArray(permissions)) return permissions;
+  if (typeof permissions === 'string') {
+    try {
+      const parsed = JSON.parse(permissions);
+      if (typeof parsed === 'object' && parsed !== null) return parsed;
+    } catch(e) {
+      return {};
+    }
+  }
+  return {};
+}
+
 // ------------------------------------------------------------
 // GET /api/leaders
 // List all floor leaders with their assigned floors and stats (Admin only)
@@ -43,7 +58,7 @@ function parseSessions(sessions) {
 router.get('/', verifyAdmin, async (req, res) => {
   try {
     const [leaders] = await pool.query(`
-      SELECT id, username, name, phone_number, assigned_floors, assigned_sessions, floor_id, is_active, created_at
+      SELECT id, username, name, phone_number, assigned_floors, assigned_sessions, session_permissions, floor_id, is_active, created_at
       FROM floor_leaders
       ORDER BY id DESC
     `);
@@ -71,6 +86,7 @@ router.get('/', verifyAdmin, async (req, res) => {
     const enrichedLeaders = leaders.map(leader => {
       const floorList = parseFloors(leader.assigned_floors || [leader.floor_id]);
       const sessionList = parseSessions(leader.assigned_sessions);
+      const sessionPerms = parsePermissions(leader.session_permissions);
       
       const floorDetails = floorList.map(fid => ({
         floor_id: fid,
@@ -79,10 +95,11 @@ router.get('/', verifyAdmin, async (req, res) => {
       }));
 
       const sessionDetails = sessionList.includes('all')
-        ? [{ session_key: 'all', session_name: 'All Sessions' }]
+        ? [{ session_key: 'all', session_name: 'All Sessions', mode: sessionPerms['all'] || 'edit' }]
         : sessionList.map(skey => ({
             session_key: skey,
-            session_name: sessionMap.get(skey) || (skey.charAt(0).toUpperCase() + skey.slice(1) + ' Attendance')
+            session_name: sessionMap.get(skey) || (skey.charAt(0).toUpperCase() + skey.slice(1) + ' Attendance'),
+            mode: sessionPerms[skey] || sessionPerms['all'] || 'edit'
           }));
 
       const totalAssignedStudents = floorDetails.reduce((sum, f) => sum + f.student_count, 0);
@@ -94,6 +111,7 @@ router.get('/', verifyAdmin, async (req, res) => {
         phone_number: leader.phone_number,
         assigned_floors: floorList,
         assigned_sessions: sessionList,
+        session_permissions: sessionPerms,
         floor_details: floorDetails,
         session_details: sessionDetails,
         total_students: totalAssignedStudents,
@@ -115,7 +133,7 @@ router.get('/', verifyAdmin, async (req, res) => {
 // ------------------------------------------------------------
 router.post('/', verifyAdmin, async (req, res) => {
   try {
-    const { name, username, password, assigned_floors, assigned_sessions, phone_number } = req.body;
+    const { name, username, password, assigned_floors, assigned_sessions, session_permissions, phone_number } = req.body;
 
     if (!name || !username || !password) {
       return res.status(400).json({ success: false, message: 'Name, Username ID, and Password are required' });
@@ -134,6 +152,7 @@ router.post('/', verifyAdmin, async (req, res) => {
     }
 
     const sessions = parseSessions(assigned_sessions);
+    const permissions = parsePermissions(session_permissions);
 
     // Check if username already exists in floor_leaders
     const [existing] = await pool.query(
@@ -149,11 +168,12 @@ router.post('/', verifyAdmin, async (req, res) => {
     const primaryFloor = floors[0];
     const floorsJson = JSON.stringify(floors);
     const sessionsJson = JSON.stringify(sessions);
+    const permissionsJson = JSON.stringify(permissions);
 
     const [result] = await pool.query(`
-      INSERT INTO floor_leaders (username, name, phone_number, password_hash, assigned_floors, assigned_sessions, floor_id, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
-    `, [trimmedUsername, trimmedName, phone_number || null, passwordHash, floorsJson, sessionsJson, primaryFloor]);
+      INSERT INTO floor_leaders (username, name, phone_number, password_hash, assigned_floors, assigned_sessions, session_permissions, floor_id, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+    `, [trimmedUsername, trimmedName, phone_number || null, passwordHash, floorsJson, sessionsJson, permissionsJson, primaryFloor]);
 
     return res.status(201).json({
       success: true,
@@ -164,9 +184,10 @@ router.post('/', verifyAdmin, async (req, res) => {
         phone_number: phone_number || null,
         assigned_floors: floors,
         assigned_sessions: sessions,
+        session_permissions: permissions,
         is_active: true
       },
-      message: 'Floor Leader created successfully'
+      message: 'User credential created successfully'
     });
   } catch (err) {
     console.error('Error creating floor leader:', err);
@@ -181,7 +202,7 @@ router.post('/', verifyAdmin, async (req, res) => {
 router.put('/:id', verifyAdmin, async (req, res) => {
   try {
     const leaderId = req.params.id;
-    const { name, username, password, assigned_floors, assigned_sessions, phone_number, is_active } = req.body;
+    const { name, username, password, assigned_floors, assigned_sessions, session_permissions, phone_number, is_active } = req.body;
 
     const [existing] = await pool.query('SELECT * FROM floor_leaders WHERE id = ?', [leaderId]);
     if (existing.length === 0) {
@@ -211,6 +232,12 @@ router.put('/:id', verifyAdmin, async (req, res) => {
       updatedSessions = JSON.stringify(parsedSess);
     }
 
+    let updatedPermissions = leader.session_permissions;
+    if (session_permissions !== undefined) {
+      const parsedPerms = parsePermissions(session_permissions);
+      updatedPermissions = JSON.stringify(parsedPerms);
+    }
+
     // Check if username is being changed to something already taken
     if (username && String(username).trim().toLowerCase() !== String(leader.username || '').toLowerCase()) {
       const [duplicate] = await pool.query(
@@ -229,19 +256,20 @@ router.put('/:id', verifyAdmin, async (req, res) => {
 
     await pool.query(`
       UPDATE floor_leaders
-      SET username = ?, name = ?, phone_number = ?, password_hash = ?, assigned_floors = ?, assigned_sessions = ?, floor_id = ?, is_active = ?
+      SET username = ?, name = ?, phone_number = ?, password_hash = ?, assigned_floors = ?, assigned_sessions = ?, session_permissions = ?, floor_id = ?, is_active = ?
       WHERE id = ?
-    `, [updatedUsername, updatedName, updatedPhone, passwordHash, updatedFloors, updatedSessions, primaryFloor, updatedActive, leaderId]);
+    `, [updatedUsername, updatedName, updatedPhone, passwordHash, updatedFloors, updatedSessions, updatedPermissions, primaryFloor, updatedActive, leaderId]);
 
     return res.json({
       success: true,
-      message: 'Floor leader updated successfully',
+      message: 'User credential updated successfully',
       data: {
         id: leaderId,
         username: updatedUsername,
         name: updatedName,
         assigned_floors: parseFloors(updatedFloors),
         assigned_sessions: parseSessions(updatedSessions),
+        session_permissions: parsePermissions(updatedPermissions),
         is_active: updatedActive === 1
       }
     });

@@ -16,6 +16,10 @@ import {
   Plus, 
   Sparkles, 
   ShieldAlert,
+  ShieldCheck,
+  AlertTriangle,
+  Activity,
+  Calendar,
   Clock,
   UserCheck,
   Eye,
@@ -30,6 +34,13 @@ import { HamsCard } from '../../components/HamsCard';
 
 export const StudentsManagementView: React.FC = () => {
   const { admin } = useAuth();
+  const isLeader = (admin?.role || '').toUpperCase() === 'LEADER' || (admin?.role || '').toLowerCase() === 'floor_leader';
+  let permissions: any = admin?.session_permissions || {};
+  if (typeof permissions === 'string') {
+    try { permissions = JSON.parse(permissions); } catch (e) { permissions = {}; }
+  }
+  const canResetIp = !isLeader || permissions?.can_reset_ip === true || permissions?.can_reset_ip === 'true' || permissions?.can_reset_ip === 1 || permissions?.can_reset_ip === '1';
+
   const [students, setStudents] = useState<any[]>([]);
   const [floors, setFloors] = useState<any[]>([]);
   const [allTags, setAllTags] = useState<any[]>([]);
@@ -178,13 +189,13 @@ export const StudentsManagementView: React.FC = () => {
       });
 
       if (res.data.success) {
-        alert(`Floor Leader account for "${leaderFormName}" created successfully!\n\nUsername: ${leaderFormUsername}\nPassword: ${leaderFormPassword}`);
+        alert(`User Credential account for "${leaderFormName}" created successfully!\n\nUsername: ${leaderFormUsername}\nPassword: ${leaderFormPassword}`);
         setLeaderModalOpen(false);
       } else {
-        setLeaderModalError(res.data.message || 'Failed to create floor leader');
+        setLeaderModalError(res.data.message || 'Failed to create user credential');
       }
     } catch (err: any) {
-      setLeaderModalError(err.response?.data?.message || 'Error creating floor leader');
+      setLeaderModalError(err.response?.data?.message || 'Error creating user credential');
     } finally {
       setLeaderSubmitting(false);
     }
@@ -454,11 +465,11 @@ export const StudentsManagementView: React.FC = () => {
   const resetStudentIp = async (studentId: string, studentName: string) => {
     if (!window.confirm(`Reset IP & device binding for "${studentName}"? This will allow the student to log in from a new IP/device.`)) return;
     try {
-      await apiClient.post(`/api/students/${studentId}/reset-ip`);
-      alert(`IP binding for ${studentName} successfully reset!`);
+      const res = await apiClient.post(`/students/${studentId}/reset-ip`);
+      alert(res?.data?.message || `IP binding for ${studentName} successfully reset!`);
       fetchData();
     } catch (err: any) {
-      alert(err?.response?.data?.error || 'Failed to reset IP binding');
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to reset IP binding');
     }
   };
 
@@ -701,44 +712,48 @@ export const StudentsManagementView: React.FC = () => {
             </button>
           )}
 
-          <button
-            onClick={() => setAddModalOpen(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 18px',
-              backgroundColor: '#4f46e5',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '10px',
-              fontSize: '14px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
-            }}
-          >
-            <UserPlus size={18} /> Add Student
-          </button>
+          {admin?.role !== 'LEADER' && (
+            <>
+              <button
+                onClick={() => setAddModalOpen(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 18px',
+                  backgroundColor: '#4f46e5',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                }}
+              >
+                <UserPlus size={18} /> Add Student
+              </button>
 
-          <button
-            onClick={syncStudents}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 18px',
-              backgroundColor: '#ffffff',
-              color: '#475569',
-              border: '1px solid #cbd5e1',
-              borderRadius: '10px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <RefreshCw size={16} /> Sync Central DB
-          </button>
+              <button
+                onClick={syncStudents}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 18px',
+                  backgroundColor: '#ffffff',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <RefreshCw size={16} /> Sync Central DB
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -808,7 +823,7 @@ export const StudentsManagementView: React.FC = () => {
                 key={student.student_id || student.id} 
                 padding="18px" 
                 style={{ ...cardStyle, cursor: 'pointer' }}
-                onDoubleClick={() => handleStudentDoubleClick(student)}
+                onDoubleClick={() => showStudentDetails(student)}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
                   <div style={{
@@ -960,26 +975,28 @@ export const StudentsManagementView: React.FC = () => {
                         {student.is_default_present ? 'Default ON' : 'Default Att.'}
                       </button>
 
-                      <button
-                        onClick={() => resetStudentIp(student.student_id || student.id, student.name)}
-                        title="Reset bound IP / device address to allow login from new network"
-                        style={{
-                          padding: '6px 10px',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                          border: '1px solid #e0e7ff',
-                          borderRadius: '6px',
-                          backgroundColor: '#f5f3ff',
-                          color: '#6366f1',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}
-                      >
-                        <RotateCcw size={13} color="#6366f1" />
-                        Reset IP
-                      </button>
+                      {canResetIp && (
+                        <button
+                          onClick={() => resetStudentIp(student.student_id || student.id, student.name)}
+                          title="Reset bound IP / device address to allow login from new network"
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            border: '1px solid #e0e7ff',
+                            borderRadius: '6px',
+                            backgroundColor: '#f5f3ff',
+                            color: '#6366f1',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <RotateCcw size={13} color="#6366f1" />
+                          Reset IP
+                        </button>
+                      )}
 
                       <button
                         onClick={() => deleteStudent(student.student_id || student.id)}
@@ -1423,77 +1440,390 @@ export const StudentsManagementView: React.FC = () => {
 
       {/* Details Modal */}
       {detailsModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '460px', boxShadow: '0 20px 40px rgba(0,0,0,0.15)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Student Profile</h3>
-              <X size={20} style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => setDetailsModal(null)} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px', fontSize: '14px', color: '#334155' }}>
-              <strong>Name:</strong> <span>{detailsModal.name || `${detailsModal.firstName || ''} ${detailsModal.lastName || ''}`.trim()}</span>
-              <strong>ID / Code:</strong> <span style={{ color: '#4f46e5', fontWeight: 700 }}>{detailsModal.bankCode}</span>
-              <strong>Room:</strong> <span>{detailsModal.room || detailsModal.room_number || 'Not Assigned'}</span>
-              <strong>Floor:</strong> <span>{detailsModal.floor_name || (detailsModal.floor_id ? `Floor ${detailsModal.floor_id}` : 'Unassigned')}</span>
-              <strong>Mobile:</strong> <span>{detailsModal.mobileNumber || detailsModal.phone || 'N/A'}</span>
-              {detailsModal.parentPhone && detailsModal.parentPhone !== 'N/A' && (
-                <>
-                  <strong>Parent Phone:</strong> <span>{detailsModal.parentPhone}</span>
-                </>
-              )}
-              <strong>Group:</strong> <span>{detailsModal.group || 'Hostel Student'}</span>
-              {detailsModal.dateOfBirth && detailsModal.dateOfBirth !== 'N/A' && (
-                <>
-                  <strong>DOB:</strong> <span>{detailsModal.dateOfBirth}</span>
-                </>
-              )}
-              {detailsModal.emailId && detailsModal.emailId !== 'N/A' && (
-                <>
-                  <strong>Email:</strong> <span>{detailsModal.emailId}</span>
-                </>
-              )}
-              {detailsModal.city && detailsModal.city !== 'N/A' && (
-                <>
-                  <strong>City:</strong> <span>{detailsModal.city}</span>
-                </>
-              )}
-              <strong>Security Binding:</strong>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', color: '#475569' }}>
-                  {detailsModal.bound_ip || 'No IP Bound (Free to Login)'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => resetStudentIp(detailsModal.student_id || detailsModal.id || detailsModal.bankCode, detailsModal.name || detailsModal.firstName)}
-                  style={{
-                    padding: '3px 8px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    borderRadius: '6px',
-                    border: '1px solid #c7d2fe',
-                    backgroundColor: '#eef2ff',
-                    color: '#4f46e5',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <RotateCcw size={11} /> Reset IP
-                </button>
-              </div>
-            </div>
-            {detailsModal.tags && detailsModal.tags.length > 0 && (
-              <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
-                <strong style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '6px' }}>Assigned Tags:</strong>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {detailsModal.tags.map((t: any) => (
-                    <span key={t.id || t.name} style={{ backgroundColor: `${t.color || '#4f46e5'}15`, color: t.color || '#4f46e5', border: `1px solid ${t.color || '#4f46e5'}40`, borderRadius: '6px', padding: '2px 8px', fontSize: '12px', fontWeight: 700 }}>
-                      {t.name}
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '20px',
+            width: '100%',
+            maxWidth: '620px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px',
+              borderBottom: '1px solid #f1f5f9',
+              position: 'sticky',
+              top: 0,
+              backgroundColor: '#ffffff',
+              zIndex: 10
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  backgroundColor: '#eef2ff',
+                  color: '#4f46e5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '18px',
+                  fontWeight: 800
+                }}>
+                  {(detailsModal.name || detailsModal.firstName || '?')[0]?.toUpperCase()}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                    {detailsModal.name || `${detailsModal.firstName || ''} ${detailsModal.lastName || ''}`.trim()}
+                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#4f46e5', backgroundColor: '#eef2ff', padding: '2px 8px', borderRadius: '6px' }}>
+                      ID: {detailsModal.bankCode}
                     </span>
-                  ))}
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>
+                      {detailsModal.floor_name || (detailsModal.floor_id ? `Floor ${detailsModal.floor_id}` : 'Unassigned')} • Room {detailsModal.room || detailsModal.room_number || 'N/A'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            )}
+              <button
+                onClick={() => setDetailsModal(null)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Basic Contact & Profile Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                gap: '12px',
+                padding: '14px',
+                backgroundColor: '#f8fafc',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                fontSize: '13px'
+              }}>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>MOBILE NUMBER</span>
+                  <strong style={{ color: '#0f172a' }}>{detailsModal.mobileNumber || detailsModal.phone || 'N/A'}</strong>
+                </div>
+                {detailsModal.parentPhone && detailsModal.parentPhone !== 'N/A' && (
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>PARENT PHONE</span>
+                    <strong style={{ color: '#0f172a' }}>{detailsModal.parentPhone}</strong>
+                  </div>
+                )}
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>STUDENT GROUP</span>
+                  <strong style={{ color: '#0f172a' }}>{detailsModal.group || 'Hostel Student'}</strong>
+                </div>
+                {detailsModal.emailId && detailsModal.emailId !== 'N/A' && (
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>EMAIL</span>
+                    <strong style={{ color: '#0f172a' }}>{detailsModal.emailId}</strong>
+                  </div>
+                )}
+                {detailsModal.city && detailsModal.city !== 'N/A' && (
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>CITY / STATE</span>
+                    <strong style={{ color: '#0f172a' }}>{detailsModal.city}</strong>
+                  </div>
+                )}
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 600, display: 'block' }}>AUTO-ATTENDANCE</span>
+                  <strong style={{ color: detailsModal.is_default_present ? '#059669' : '#64748b' }}>
+                    {detailsModal.is_default_present ? '✅ Default Present ON' : 'Standard (Manual/Scan)'}
+                  </strong>
+                </div>
+              </div>
+
+              {/* SECTION 1: SESSION-WISE ATTENDANCE PERCENTAGES */}
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', backgroundColor: '#ffffff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={16} color="#4f46e5" />
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>
+                      Session Attendance Breakdown
+                    </h4>
+                  </div>
+                  {detailsModal.overall_stats && (
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      backgroundColor: (detailsModal.overall_stats.percentage || 0) >= 75 ? '#ecfdf5' : (detailsModal.overall_stats.percentage || 0) >= 40 ? '#fffbeb' : '#fef2f2',
+                      color: (detailsModal.overall_stats.percentage || 0) >= 75 ? '#059669' : (detailsModal.overall_stats.percentage || 0) >= 40 ? '#d97706' : '#dc2626'
+                    }}>
+                      Overall: {detailsModal.overall_stats.percentage || 0}% ({detailsModal.overall_stats.total_attended || 0}/{detailsModal.overall_stats.total_held || 0})
+                    </span>
+                  )}
+                </div>
+
+                {/* Session Percentages Grid */}
+                {(!detailsModal.session_stats || detailsModal.session_stats.length === 0) ? (
+                  <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '12px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
+                    No session attendance records available yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+                    {detailsModal.session_stats.map((sess: any) => {
+                      const perc = sess.percentage || 0;
+                      const isGood = perc >= 75;
+                      const isMed = perc >= 40 && perc < 75;
+                      const color = isGood ? '#10b981' : isMed ? '#f59e0b' : '#ef4444';
+                      const bg = isGood ? '#ecfdf5' : isMed ? '#fffbeb' : '#fef2f2';
+
+                      return (
+                        <div
+                          key={sess.session_key}
+                          style={{
+                            padding: '10px 12px',
+                            backgroundColor: '#f8fafc',
+                            borderRadius: '10px',
+                            border: '1px solid #e2e8f0',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>
+                              {sess.session_name}
+                            </span>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              color: color,
+                              backgroundColor: bg,
+                              padding: '2px 6px',
+                              borderRadius: '6px'
+                            }}>
+                              {perc}%
+                            </span>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div style={{ width: '100%', height: '5px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(0, perc))}%`,
+                                height: '100%',
+                                backgroundColor: color,
+                                borderRadius: '3px',
+                                transition: 'width 0.3s ease'
+                              }}
+                            />
+                          </div>
+
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            Attended: <strong>{sess.attended}</strong> / {sess.held} held
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: SECURITY & BROKEN RULES AUDIT LOG */}
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', backgroundColor: '#ffffff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <ShieldAlert size={16} color="#dc2626" />
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>
+                    Security, Mistakes & Rule Infraction Logs
+                  </h4>
+                </div>
+
+                {/* Device & IP Security Logs */}
+                {((detailsModal.security_logs && detailsModal.security_logs.length > 0) ||
+                  (detailsModal.ai_audit_logs && detailsModal.ai_audit_logs.length > 0) ||
+                  (detailsModal.absent_records && detailsModal.absent_records.length > 0)) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {/* Device IP Conflicts */}
+                    {(detailsModal.security_logs || []).map((log: any) => (
+                      <div
+                        key={log.id}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '10px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', fontSize: '11px' }}>
+                            🚨 {log.event_type || 'SECURITY CONFLICT'}
+                          </span>
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>
+                            {log.status || 'BLOCKED'} • {new Date(log.attempted_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div style={{ color: '#451a03', fontWeight: 600, lineHeight: 1.4 }}>
+                          {log.details || `Cross-account login attempt detected with IP ${log.ip_address}`}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '4px' }}>
+                          IP: <code>{log.ip_address}</code> {log.device_uuid ? `• Device: ${log.device_uuid.slice(0, 16)}...` : ''}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* AI Behavioral Findings */}
+                    {(detailsModal.ai_audit_logs || []).map((ai: any) => (
+                      <div
+                        key={ai.id}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          borderRadius: '10px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 800, color: '#92400e', fontSize: '11px' }}>
+                            🤖 AI BEHAVIORAL AUDIT: {ai.assigned_tag}
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#b45309' }}>
+                            {new Date(ai.analyzed_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div style={{ color: '#78350f', fontWeight: 600 }}>
+                          {ai.reason}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Recorded Absences */}
+                    {(detailsModal.absent_records || []).map((abs: any) => (
+                      <div
+                        key={abs.id}
+                        style={{
+                          padding: '8px 12px',
+                          backgroundColor: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div>
+                          <span style={{ fontWeight: 700, color: '#334155' }}>Absence on {abs.session_date}:</span>{' '}
+                          <span style={{ color: '#64748b' }}>{abs.reason || 'Unexcused Absence'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '14px',
+                    backgroundColor: '#ecfdf5',
+                    border: '1px solid #a7f3d0',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: '#065f46',
+                    fontSize: '12px',
+                    fontWeight: 600
+                  }}>
+                    <ShieldCheck size={18} color="#059669" />
+                    <span>Clean Security Record: No device conflicts, unauthorized login attempts, or rule infractions logged for this student.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 3: DEVICE & IP BINDING */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 14px',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px'
+              }}>
+                <div>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', display: 'block', textTransform: 'uppercase' }}>
+                    Bound Network IP
+                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                    {detailsModal.bound_ip || 'No IP Bound (Free to Login)'}
+                  </span>
+                </div>
+                {canResetIp && (
+                  <button
+                    type="button"
+                    onClick={() => resetStudentIp(detailsModal.student_id || detailsModal.id || detailsModal.bankCode, detailsModal.name || detailsModal.firstName)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      borderRadius: '8px',
+                      border: '1px solid #c7d2fe',
+                      backgroundColor: '#eef2ff',
+                      color: '#4f46e5',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    <RotateCcw size={12} /> Reset Bound IP
+                  </button>
+                )}
+              </div>
+
+              {/* SECTION 4: ASSIGNED TAGS */}
+              {detailsModal.tags && detailsModal.tags.length > 0 && (
+                <div>
+                  <strong style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Assigned Tags:
+                  </strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {detailsModal.tags.map((t: any) => (
+                      <span
+                        key={t.id || t.name}
+                        style={{
+                          backgroundColor: `${t.color || '#4f46e5'}15`,
+                          color: t.color || '#4f46e5',
+                          border: `1px solid ${t.color || '#4f46e5'}40`,
+                          borderRadius: '6px',
+                          padding: '3px 10px',
+                          fontSize: '12px',
+                          fontWeight: 700
+                        }}
+                      >
+                        {t.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1543,7 +1873,7 @@ export const StudentsManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
-                    Create New Floor Leader
+                    Create User Credential
                   </h3>
                   <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: '#64748b' }}>
                     Assign multiple floors and set login ID & password
@@ -1947,7 +2277,7 @@ export const StudentsManagementView: React.FC = () => {
                   }}
                 >
                   <UserCheck size={16} />
-                  {leaderSubmitting ? 'Creating...' : 'Create Floor Leader'}
+                  {leaderSubmitting ? 'Creating...' : 'Create User Credential'}
                 </button>
               </div>
             </form>

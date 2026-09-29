@@ -18,7 +18,8 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
       search, 
       startDate, 
       endDate, 
-      active_only 
+      active_only,
+      timing_status
     } = req.query;
 
     // On-demand background sync if specific dates are queried or if sync hasn't run in 30s
@@ -67,8 +68,12 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
     `;
     const params = [];
 
-    if (active_only === 'true') {
+    if (timing_status === 'active' || active_only === 'true') {
       query += ` AND l.status = 'approved' AND NOW() BETWEEN l.start_time AND l.end_time`;
+    } else if (timing_status === 'future') {
+      query += ` AND l.status = 'approved' AND l.start_time > NOW()`;
+    } else if (timing_status === 'past') {
+      query += ` AND l.status = 'approved' AND l.end_time < NOW()`;
     }
 
     if (status && status !== 'all') {
@@ -112,7 +117,18 @@ router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
       params.push(term, term, term, term, term, term, term, term);
     }
 
-    query += ` ORDER BY l.start_time DESC LIMIT 500`;
+    query += ` ORDER BY 
+      CASE 
+        WHEN NOW() BETWEEN l.start_time AND l.end_time THEN 1
+        WHEN l.start_time > NOW() THEN 2
+        ELSE 3
+      END ASC,
+      CASE 
+        WHEN NOW() BETWEEN l.start_time AND l.end_time THEN l.end_time
+        WHEN l.start_time > NOW() THEN l.start_time
+      END ASC,
+      l.start_time DESC 
+    LIMIT 500`;
 
     const [rows] = await pool.query(query, params);
 
