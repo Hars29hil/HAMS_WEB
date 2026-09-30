@@ -44,6 +44,7 @@ export const WhatsAppMessagingView: React.FC = () => {
   const [sessions, setSessions] = useState<any[]>([]);
   // Multi-day Filters
   const todayStr = new Date().toISOString().slice(0, 10);
+  const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState<string>(todayStr);
   const [endDate, setEndDate] = useState<string>(todayStr);
   const [selectedSession, setSelectedSession] = useState<string>('night');
