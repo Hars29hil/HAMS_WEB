@@ -5,6 +5,7 @@ const { verifyStudent, verifyFloorLeader, verifyAdminOrFloorLeader, verifyOperat
 const admin = require('../config/firebase');
 const crypto = require('crypto');
 const { getCurrentIST } = require('../utils/time');
+const leaveService = require('../services/leaveService');
 
 const SECRET_KEY = process.env.AES_SECRET_KEY || 'HAMS_SECRET_KEY!'; // Must be 16 bytes for AES-128
 
@@ -1722,14 +1723,14 @@ const handleManualMark = async (req, res) => {
 
     // 3. Upsert attendance record
     const [existing] = await pool.query(
-      'SELECT id FROM attendance_records WHERE session_id = ? AND (TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?) OR bank_code = ?)',
+      'SELECT session_id, bank_code FROM attendance_records WHERE session_id = ? AND (TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?) OR bank_code = ?)',
       [activeSessionId, student.student_code, student.student_code]
     );
 
     if (existing.length > 0) {
       await pool.query(
-        'UPDATE attendance_records SET is_late = ?, ble_token_used = "MANUAL_ENTRY", remarks = ?, marked_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [lateFlag ? 1 : 0, noteText, existing[0].id]
+        'UPDATE attendance_records SET is_late = ?, ble_token_used = "MANUAL_ENTRY", remarks = ?, marked_at = CURRENT_TIMESTAMP WHERE session_id = ? AND bank_code = ?',
+        [lateFlag ? 1 : 0, noteText, existing[0].session_id, existing[0].bank_code]
       );
     } else {
       await pool.query(
@@ -1912,6 +1913,37 @@ router.get('/session/:type/students', verifyAdminOrFloorLeader, async (req, res)
       } catch (tErr) {
         console.warn('Target query error:', tErr.message);
       }
+    }
+
+    // Auto-mark default attendance students if session exists for this date & type
+    try {
+      let [sessRows] = await pool.query(
+        'SELECT id FROM attendance_sessions WHERE (DATE(session_date) = ? OR session_date = ?) AND LOWER(session_type) = LOWER(?)',
+        [sessionDate, sessionDate, sessionType]
+      );
+      if (sessRows.length > 0) {
+        const activeSessId = sessRows[0].id;
+        const [defaultStudents] = await pool.query(
+          'SELECT id, student_code, name, floor_id FROM students WHERE is_active = TRUE AND is_default_present = TRUE'
+        );
+        for (const st of defaultStudents) {
+          const onLeave = await leaveService.isStudentOnLeave(st.id, st.student_code, sessionDate);
+          if (onLeave) continue;
+          const [existing] = await pool.query(
+            'SELECT session_id FROM attendance_records WHERE session_id = ? AND (TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?) OR bank_code = ?)',
+            [activeSessId, st.student_code, st.student_code]
+          );
+          if (existing.length === 0) {
+            await pool.query(
+              `INSERT INTO attendance_records (session_id, bank_code, student_name, floor_id, device_uuid, rssi, ble_token_used, is_late, remarks)
+               VALUES (?, ?, ?, ?, 'AUTO_DEFAULT', 0, 'DEFAULT_AUTO_PRESENT', 0, 'Auto-marked as Default Present')`,
+              [activeSessId, st.student_code, st.name, st.floor_id || 0]
+            );
+          }
+        }
+      }
+    } catch (defErr) {
+      console.warn('Auto-mark default present check error:', defErr.message);
     }
 
     const query = `

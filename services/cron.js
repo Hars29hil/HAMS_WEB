@@ -3,6 +3,7 @@ const pool = require('../config/db');
 const admin = require('../config/firebase');
 const { getCurrentIST } = require('../utils/time');
 const { sendMessage } = require('./whatsapp');
+const leaveService = require('./leaveService');
 
 async function sendPushNotification(tokens, title, body) {
   if (!tokens || tokens.length === 0) return;
@@ -309,15 +310,15 @@ cron.schedule('* * * * *', async () => {
             if (onLeave) continue; // Skip students who are on approved leave
 
             const [existing] = await pool.query(
-              'SELECT id FROM attendance_records WHERE session_id = ? AND (student_id = ? OR TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?))',
-              [activeSessionId, st.id, st.student_code]
+              'SELECT session_id, bank_code FROM attendance_records WHERE session_id = ? AND (TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?))',
+              [activeSessionId, st.student_code]
             );
 
             if (existing.length === 0) {
               await pool.query(
-                `INSERT INTO attendance_records (session_id, bank_code, student_name, student_id, floor_id, device_uuid, rssi, ble_token_used, is_late, remarks)
-                 VALUES (?, ?, ?, ?, ?, 'AUTO_DEFAULT', 0, 'DEFAULT_AUTO_PRESENT', 0, 'Auto-marked as Default Present')`,
-                [activeSessionId, st.student_code, st.name, st.id, st.floor_id || 0]
+                `INSERT INTO attendance_records (session_id, bank_code, student_name, floor_id, device_uuid, rssi, ble_token_used, is_late, remarks)
+                 VALUES (?, ?, ?, ?, 'AUTO_DEFAULT', 0, 'DEFAULT_AUTO_PRESENT', 0, 'Auto-marked as Default Present')`,
+                [activeSessionId, st.student_code, st.name, st.floor_id || 0]
               );
             }
           }
@@ -382,8 +383,6 @@ cron.schedule('59 23 * * 0', async () => {
 // ------------------------------------------------------------
 // Automatic Leave Sync from Central College Portal (Every 2 Minutes)
 // ------------------------------------------------------------
-const leaveService = require('./leaveService');
-
 cron.schedule('*/2 * * * *', async () => {
   try {
     const today = new Date();

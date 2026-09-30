@@ -3,6 +3,8 @@ const router = express.Router();
 const pool = require('../config/db');
 const { verifyAdmin, verifyAdminOrFloorLeader } = require('../middleware/auth');
 const https = require('https');
+const leaveService = require('../services/leaveService');
+const { getCurrentIST } = require('../utils/time');
 
 router.use(verifyAdminOrFloorLeader);
 
@@ -755,6 +757,41 @@ router.put('/:id/default-attendance', async (req, res) => {
     }
 
     await pool.query('UPDATE students SET is_default_present = ? WHERE id = ?', [newVal ? 1 : 0, studentId]);
+
+    // If enabled, immediately mark present for any attendance sessions today
+    if (newVal) {
+      try {
+        const [stRows] = await pool.query('SELECT id, student_code, name, floor_id FROM students WHERE id = ?', [studentId]);
+        if (stRows.length > 0) {
+          const st = stRows[0];
+          const now = getCurrentIST();
+          const sessionDate = now.toISOString().slice(0, 10);
+          const [activeSessions] = await pool.query(
+            'SELECT id, session_type FROM attendance_sessions WHERE (DATE(session_date) = ? OR session_date = ?)',
+            [sessionDate, sessionDate]
+          );
+
+          for (const sess of activeSessions) {
+            const onLeave = await leaveService.isStudentOnLeave(st.id, st.student_code, sessionDate);
+            if (!onLeave) {
+              const [existing] = await pool.query(
+                'SELECT session_id, bank_code FROM attendance_records WHERE session_id = ? AND (TRIM(LEADING "0" FROM bank_code) = TRIM(LEADING "0" FROM ?) OR bank_code = ?)',
+                [sess.id, st.student_code, st.student_code]
+              );
+              if (existing.length === 0) {
+                await pool.query(
+                  `INSERT INTO attendance_records (session_id, bank_code, student_name, floor_id, device_uuid, rssi, ble_token_used, is_late, remarks)
+                   VALUES (?, ?, ?, ?, 'AUTO_DEFAULT', 0, 'DEFAULT_AUTO_PRESENT', 0, 'Auto-marked as Default Present')`,
+                  [sess.id, st.student_code, st.name, st.floor_id || 0]
+                );
+              }
+            }
+          }
+        }
+      } catch (autoErr) {
+        console.warn('Auto-mark on toggle error:', autoErr.message);
+      }
+    }
 
     return res.json({ 
       success: true, 
