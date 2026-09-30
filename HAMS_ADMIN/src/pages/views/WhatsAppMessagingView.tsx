@@ -42,15 +42,32 @@ export const WhatsAppMessagingView: React.FC = () => {
   const [students, setStudents] = useState<any[]>([]);
   const [floors, setFloors] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
-  const [sessionAttendanceMap, setSessionAttendanceMap] = useState<Record<string, { status: string; marked_at?: string; is_late?: boolean }>>({});
-  
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  // Multi-day Filters
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState<string>(todayStr);
+  const [endDate, setEndDate] = useState<string>(todayStr);
   const [selectedSession, setSelectedSession] = useState<string>('night');
   const [selectedFloor, setSelectedFloor] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [recipientTarget, setRecipientTarget] = useState<'student' | 'parent' | 'both'>('student');
+
+  const [multiDayAttendanceMap, setMultiDayAttendanceMap] = useState<Record<string, Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }>>>({});
+
+  const datesInRange = React.useMemo(() => {
+    if (!startDate || !endDate) return [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (start > end) return [startDate];
+    const list: string[] = [];
+    const curr = new Date(start);
+    while (curr <= end) {
+      list.push(curr.toISOString().slice(0, 10));
+      curr.setDate(curr.getDate() + 1);
+    }
+    return list;
+  }, [startDate, endDate]);
+
+  const totalDays = datesInRange.length || 1;
 
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
   const [reportData, setReportData] = useState<any>({});
@@ -67,7 +84,7 @@ export const WhatsAppMessagingView: React.FC = () => {
 
   useEffect(() => {
     fetchSessionAttendance();
-  }, [selectedDate, selectedSession]);
+  }, [startDate, endDate, selectedSession]);
 
   const fetchWaStatus = async () => {
     try {
@@ -114,56 +131,113 @@ export const WhatsAppMessagingView: React.FC = () => {
 
   const [attendanceLoading, setAttendanceLoading] = useState(false);
 
-  const getStudentAttendance = (s: any) => {
-    if (!s) return null;
+  const getStudentSummary = (s: any) => {
+    if (!s) {
+      return {
+        absentCount: 0,
+        presentCount: 0,
+        lateCount: 0,
+        leaveCount: 0,
+        notStartedCount: 0,
+        daysCount: totalDays,
+        isStrictAbsent: false,
+        isStrictPresent: false,
+        isStrictLate: false,
+        isStrictLeave: false,
+        isStrictNotStarted: false,
+        dailyList: []
+      };
+    }
     const idKey = String(s.id);
     const rawCode = String(s.student_code || s.bank_code || s.bankCode || '').trim();
     const unpadded = rawCode.replace(/^0+/, '');
     const padded = rawCode ? rawCode.padStart(4, '0') : '';
 
-    return (
-      sessionAttendanceMap[idKey] ||
-      sessionAttendanceMap[rawCode] ||
-      (unpadded ? sessionAttendanceMap[unpadded] : undefined) ||
-      (padded ? sessionAttendanceMap[padded] : undefined) ||
-      null
-    );
+    let absentCount = 0;
+    let presentCount = 0;
+    let lateCount = 0;
+    let leaveCount = 0;
+    let notStartedCount = 0;
+    const dailyList: Array<{ date: string; status: string; is_late?: boolean; reason?: string }> = [];
+
+    for (const d of datesInRange) {
+      const dayMap = multiDayAttendanceMap[d] || {};
+      const att = dayMap[idKey] || dayMap[rawCode] || (unpadded ? dayMap[unpadded] : undefined) || (padded ? dayMap[padded] : undefined) || null;
+      const status = (att?.status || 'Not Started').toLowerCase();
+      dailyList.push({ date: d, status: att?.status || 'Not Started', is_late: att?.is_late, reason: att?.reason });
+
+      if (status === 'absent') absentCount++;
+      else if (status === 'present') presentCount++;
+      else if (status === 'late') lateCount++;
+      else if (status === 'leave') leaveCount++;
+      else notStartedCount++;
+    }
+
+    return {
+      absentCount,
+      presentCount,
+      lateCount,
+      leaveCount,
+      notStartedCount,
+      daysCount: totalDays,
+      isStrictAbsent: absentCount === totalDays && totalDays > 0,
+      isStrictPresent: presentCount === totalDays && totalDays > 0,
+      isStrictLate: lateCount === totalDays && totalDays > 0,
+      isStrictLeave: leaveCount === totalDays && totalDays > 0,
+      isStrictNotStarted: notStartedCount === totalDays && totalDays > 0,
+      dailyList
+    };
   };
 
   const fetchSessionAttendance = async () => {
-    if (!selectedSession || selectedSession === 'all') {
-      setSessionAttendanceMap({});
+    if (!selectedSession || selectedSession === 'all' || datesInRange.length === 0) {
+      setMultiDayAttendanceMap({});
       return;
     }
     setAttendanceLoading(true);
     try {
-      const res = await apiClient.get(`/attendance/session/${selectedSession}/students?date=${selectedDate}`);
-      if (res.data?.success && Array.isArray(res.data.data)) {
-        const map: Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }> = {};
-        for (const item of res.data.data) {
-          const entry = {
-            status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : (item.leave_id ? 'Leave' : (item.session_started === false ? 'Not Started' : 'Absent'))),
-            marked_at: item.marked_at,
-            is_late: Boolean(item.is_late),
-            reason: item.reason || item.absent_reason || item.leave_reason || null,
-            session_started: item.session_started
-          };
+      const results = await Promise.all(
+        datesInRange.map(async (d) => {
+          try {
+            const res = await apiClient.get(`/attendance/session/${selectedSession}/students?date=${d}`);
+            if (res.data?.success && Array.isArray(res.data.data)) {
+              const map: Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }> = {};
+              for (const item of res.data.data) {
+                const entry = {
+                  status: item.status || (item.is_present ? (item.is_late ? 'Late' : 'Present') : (item.leave_id ? 'Leave' : (item.session_started === false ? 'Not Started' : 'Absent'))),
+                  marked_at: item.marked_at,
+                  is_late: Boolean(item.is_late),
+                  reason: item.reason || item.absent_reason || item.leave_reason || null,
+                  session_started: item.session_started
+                };
 
-          if (item.student_id !== undefined && item.student_id !== null) {
-            map[String(item.student_id)] = entry;
+                if (item.student_id !== undefined && item.student_id !== null) {
+                  map[String(item.student_id)] = entry;
+                }
+                if (item.student_code) {
+                  const codeStr = String(item.student_code).trim();
+                  map[codeStr] = entry;
+                  const unpadded = codeStr.replace(/^0+/, '');
+                  if (unpadded) map[unpadded] = entry;
+                  map[codeStr.padStart(4, '0')] = entry;
+                }
+              }
+              return { date: d, map };
+            }
+          } catch (e) {
+            console.warn(`Failed to load attendance for ${d}:`, e);
           }
-          if (item.student_code) {
-            const codeStr = String(item.student_code).trim();
-            map[codeStr] = entry;
-            const unpadded = codeStr.replace(/^0+/, '');
-            if (unpadded) map[unpadded] = entry;
-            map[codeStr.padStart(4, '0')] = entry;
-          }
-        }
-        setSessionAttendanceMap(map);
+          return { date: d, map: {} };
+        })
+      );
+
+      const combined: Record<string, Record<string, any>> = {};
+      for (const r of results) {
+        combined[r.date] = r.map;
       }
+      setMultiDayAttendanceMap(combined);
     } catch (e) {
-      console.warn('Failed to load session attendance for filter:', e);
+      console.warn('Failed to load multi-day session attendance:', e);
     } finally {
       setAttendanceLoading(false);
     }
@@ -237,18 +311,28 @@ export const WhatsAppMessagingView: React.FC = () => {
       const messages = [];
       const currentSessionObj = sessions.find(s => s.session_key === selectedSession);
       const sessionLabel = currentSessionObj ? currentSessionObj.session_name : (selectedSession.charAt(0).toUpperCase() + selectedSession.slice(1) + ' Attendance');
+      const dateLabel = totalDays === 1 ? startDate : `${startDate} to ${endDate} (${totalDays} days)`;
 
       for (const s of students) {
         const sCode = String(s.student_code || s.id);
         if (selectedStudentIds.has(sCode)) {
-          const studentAttendance = getStudentAttendance(s);
-          const studentStatus = studentAttendance ? studentAttendance.status : 'Absent';
+          const summary = getStudentSummary(s);
+          let studentStatus = 'Absent';
+          if (totalDays === 1) {
+            studentStatus = summary.dailyList[0]?.status || 'Absent';
+          } else {
+            if (summary.isStrictAbsent) studentStatus = `Absent for all ${totalDays} days (${startDate} to ${endDate})`;
+            else if (summary.isStrictPresent) studentStatus = `Present for all ${totalDays} days (${startDate} to ${endDate})`;
+            else if (summary.isStrictLate) studentStatus = `Late for all ${totalDays} days (${startDate} to ${endDate})`;
+            else if (summary.isStrictLeave) studentStatus = `On Leave for all ${totalDays} days (${startDate} to ${endDate})`;
+            else studentStatus = `${summary.absentCount} days Absent, ${summary.presentCount} days Present (${totalDays} days)`;
+          }
 
           let text = messageText;
           text = text.replace(/{name}/gi, s.name || 'Student');
           text = text.replace(/{student_name}/gi, s.name || 'Student');
           text = text.replace(/{session_name}/gi, sessionLabel);
-          text = text.replace(/{date}/gi, selectedDate);
+          text = text.replace(/{date}/gi, dateLabel);
           text = text.replace(/{status}/gi, studentStatus);
           text = text.replace(/{room number}/gi, s.room_number || 'N/A');
           text = text.replace(/{room}/gi, s.room_number || 'N/A');
@@ -306,7 +390,7 @@ export const WhatsAppMessagingView: React.FC = () => {
     }
   };
 
-  // FILTERING STUDENTS: Search + Floor + Attendance Status
+  // FILTERING STUDENTS: Search + Floor + Strict Multi-Day Attendance Status
   const filteredStudents = students.filter(s => {
     const sCode = String(s.student_code || s.id);
     const sName = String(s.name || '').toLowerCase();
@@ -343,16 +427,25 @@ export const WhatsAppMessagingView: React.FC = () => {
       }
     }
 
-    // 3. Status filter (Absent / Present / Late / Leave / Not Started)
+    // 3. Status filter (Strict Continuous Matching Across the Selected Date Range)
     if (statusFilter !== 'all') {
-      const att = getStudentAttendance(s);
-      const currentStatus = att && att.status ? att.status.toLowerCase() : 'not started';
+      const summary = getStudentSummary(s);
       
-      if (statusFilter === 'absent' && currentStatus !== 'absent') return false;
-      if (statusFilter === 'present' && currentStatus !== 'present') return false;
-      if (statusFilter === 'late' && currentStatus !== 'late') return false;
-      if (statusFilter === 'leave' && currentStatus !== 'leave') return false;
-      if (statusFilter === 'not_started' && currentStatus !== 'not started') return false;
+      if (statusFilter === 'absent') {
+        // Continuous: Student must be ABSENT on ALL days of the selected date range
+        if (summary.absentCount !== totalDays) return false;
+      } else if (statusFilter === 'present') {
+        // Continuous: Student must be PRESENT on ALL days of the selected date range
+        if (summary.presentCount !== totalDays) return false;
+      } else if (statusFilter === 'late') {
+        // Continuous: Student must be LATE on ALL days of the selected date range
+        if (summary.lateCount !== totalDays) return false;
+      } else if (statusFilter === 'leave') {
+        // Continuous: Student must be on LEAVE on ALL days of the selected date range
+        if (summary.leaveCount !== totalDays) return false;
+      } else if (statusFilter === 'not_started') {
+        if (summary.notStartedCount !== totalDays) return false;
+      }
     }
 
     return true;
@@ -659,10 +752,31 @@ export const WhatsAppMessagingView: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Filter size={18} color="#4f46e5" />
-              Recipient Filters ({filteredStudents.length} matches)
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Filter size={18} color="#4f46e5" />
+                Recipient Filters ({filteredStudents.length} matches)
+              </h3>
+              
+              {/* Date Range Badge */}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                backgroundColor: totalDays > 1 ? '#eff6ff' : '#f1f5f9',
+                color: totalDays > 1 ? '#1d4ed8' : '#475569',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 700,
+                border: totalDays > 1 ? '1px solid #bfdbfe' : '1px solid #e2e8f0'
+              }}>
+                <Calendar size={13} color={totalDays > 1 ? '#2563eb' : '#64748b'} />
+                {totalDays === 1 
+                  ? `1 Day Selected (${startDate})` 
+                  : `🗓️ ${totalDays} Days Selected (${startDate} to ${endDate})`}
+              </div>
+            </div>
 
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -680,10 +794,10 @@ export const WhatsAppMessagingView: React.FC = () => {
             </div>
           </div>
 
-          {/* 4 Multi-Dimension Filters: Date, Session, Floor, Status, Search */}
+          {/* Multi-Dimension Filters: From Date, To Date, Session, Floor, Status, Search */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             gap: '12px',
             backgroundColor: '#f8fafc',
             padding: '16px',
@@ -691,15 +805,15 @@ export const WhatsAppMessagingView: React.FC = () => {
             border: '1px solid #e2e8f0'
           }}>
             
-            {/* 1. Date Filter */}
+            {/* 1. From Date Filter */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
-                📅 Attendance Date
+                📅 From Date
               </label>
               <input
                 type="date"
-                value={selectedDate}
-                onChange={e => setSelectedDate(e.target.value)}
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '9px 12px',
@@ -712,7 +826,28 @@ export const WhatsAppMessagingView: React.FC = () => {
               />
             </div>
 
-            {/* 2. Session Filter */}
+            {/* 2. To Date Filter */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
+                📅 To Date
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  backgroundColor: '#ffffff'
+                }}
+              />
+            </div>
+
+            {/* 3. Session Filter */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 ⏰ Session Type
@@ -736,7 +871,7 @@ export const WhatsAppMessagingView: React.FC = () => {
               </select>
             </div>
 
-            {/* 3. Floor Filter */}
+            {/* 4. Floor Filter */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 🏢 Floor Filter
@@ -761,7 +896,7 @@ export const WhatsAppMessagingView: React.FC = () => {
               </select>
             </div>
 
-            {/* 4. Status Filter: Absent / Present / Late / Leave */}
+            {/* 5. Status Filter: Strict Continuous Across Date Range */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 ⚡ Status Filter {attendanceLoading && <span style={{ fontSize: '10px', color: '#6366f1' }}>⏳</span>}
@@ -781,15 +916,15 @@ export const WhatsAppMessagingView: React.FC = () => {
                 }}
               >
                 <option value="all">All (Present, Late, Absent, Leave & Pending)</option>
-                <option value="present">🟢 Present Only</option>
-                <option value="late">🟡 Late Only</option>
-                <option value="absent">🔴 Absent Only</option>
-                <option value="leave">🏖️ Leave Only</option>
+                <option value="absent">🔴 Absent Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
+                <option value="present">🟢 Present Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
+                <option value="late">🟡 Late Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
+                <option value="leave">🏖️ Leave Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
                 <option value="not_started">⏳ Not Started / Pending</option>
               </select>
             </div>
 
-            {/* 5. Search by Name / ID / Room / Phone */}
+            {/* 6. Search by Name / ID / Room / Phone */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 🔍 Search Student
@@ -825,7 +960,9 @@ export const WhatsAppMessagingView: React.FC = () => {
                 <th style={{ padding: '12px 14px' }}>Student ID</th>
                 <th style={{ padding: '12px 14px' }}>Name</th>
                 <th style={{ padding: '12px 14px' }}>Floor / Room</th>
-                <th style={{ padding: '12px 14px' }}>Status ({selectedDate})</th>
+                <th style={{ padding: '12px 14px' }}>
+                  Status ({totalDays === 1 ? startDate : `${totalDays} Days: ${startDate} to ${endDate}`})
+                </th>
                 <th style={{ padding: '12px 14px' }}>Student Mobile</th>
                 <th style={{ padding: '12px 14px' }}>Parent Mobile</th>
               </tr>
@@ -834,46 +971,85 @@ export const WhatsAppMessagingView: React.FC = () => {
               {filteredStudents.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
-                    {attendanceLoading ? 'Loading session attendance records...' : 'No students match the selected filters.'}
+                    {attendanceLoading ? 'Loading session attendance records for selected date range...' : 'No students match the selected filters.'}
                   </td>
                 </tr>
               ) : (
                 filteredStudents.map(s => {
                   const sCode = String(s.student_code || s.id);
                   const isSelected = selectedStudentIds.has(sCode);
-                  const att = getStudentAttendance(s);
-                  const currentStatus = att ? (att.status || 'Not Started') : 'Not Started';
-                  const isPresent = currentStatus.toLowerCase() === 'present';
-                  const isLate = currentStatus.toLowerCase() === 'late';
-                  const isLeave = currentStatus.toLowerCase() === 'leave';
-                  const isNotStarted = currentStatus.toLowerCase() === 'not started';
+                  const summary = getStudentSummary(s);
 
                   let badgeBg = '#fef2f2';
                   let badgeColor = '#991b1b';
                   let badgeBorder = '#fecaca';
                   let badgeLabel = '🔴 Absent';
 
-                  if (isPresent) {
-                    badgeBg = '#ecfdf5';
-                    badgeColor = '#065f46';
-                    badgeBorder = '#a7f3d0';
-                    badgeLabel = '🟢 Present';
-                  } else if (isLate) {
-                    badgeBg = '#fffbeb';
-                    badgeColor = '#b45309';
-                    badgeBorder = '#fde68a';
-                    badgeLabel = '🟡 Late';
-                  } else if (isLeave) {
-                    badgeBg = '#eff6ff';
-                    badgeColor = '#1d4ed8';
-                    badgeBorder = '#bfdbfe';
-                    badgeLabel = '🏖️ Leave';
-                  } else if (isNotStarted) {
-                    badgeBg = '#f1f5f9';
-                    badgeColor = '#64748b';
-                    badgeBorder = '#e2e8f0';
-                    badgeLabel = '⏳ Not Started';
+                  if (totalDays === 1) {
+                    const currentStatus = summary.dailyList[0]?.status || 'Not Started';
+                    const isPresent = currentStatus.toLowerCase() === 'present';
+                    const isLate = currentStatus.toLowerCase() === 'late';
+                    const isLeave = currentStatus.toLowerCase() === 'leave';
+                    const isNotStarted = currentStatus.toLowerCase() === 'not started';
+
+                    if (isPresent) {
+                      badgeBg = '#ecfdf5';
+                      badgeColor = '#065f46';
+                      badgeBorder = '#a7f3d0';
+                      badgeLabel = '🟢 Present';
+                    } else if (isLate) {
+                      badgeBg = '#fffbeb';
+                      badgeColor = '#b45309';
+                      badgeBorder = '#fde68a';
+                      badgeLabel = '🟡 Late';
+                    } else if (isLeave) {
+                      badgeBg = '#eff6ff';
+                      badgeColor = '#1d4ed8';
+                      badgeBorder = '#bfdbfe';
+                      badgeLabel = '🏖️ Leave';
+                    } else if (isNotStarted) {
+                      badgeBg = '#f1f5f9';
+                      badgeColor = '#64748b';
+                      badgeBorder = '#e2e8f0';
+                      badgeLabel = '⏳ Not Started';
+                    } else {
+                      badgeBg = '#fef2f2';
+                      badgeColor = '#991b1b';
+                      badgeBorder = '#fecaca';
+                      badgeLabel = '🔴 Absent';
+                    }
+                  } else {
+                    // Multi-day status display
+                    if (summary.isStrictAbsent) {
+                      badgeBg = '#fef2f2';
+                      badgeColor = '#991b1b';
+                      badgeBorder = '#fecaca';
+                      badgeLabel = `🔴 Absent (${totalDays}/${totalDays} Days)`;
+                    } else if (summary.isStrictPresent) {
+                      badgeBg = '#ecfdf5';
+                      badgeColor = '#065f46';
+                      badgeBorder = '#a7f3d0';
+                      badgeLabel = `🟢 Present (${totalDays}/${totalDays} Days)`;
+                    } else if (summary.isStrictLate) {
+                      badgeBg = '#fffbeb';
+                      badgeColor = '#b45309';
+                      badgeBorder = '#fde68a';
+                      badgeLabel = `🟡 Late (${totalDays}/${totalDays} Days)`;
+                    } else if (summary.isStrictLeave) {
+                      badgeBg = '#eff6ff';
+                      badgeColor = '#1d4ed8';
+                      badgeBorder = '#bfdbfe';
+                      badgeLabel = `🏖️ Leave (${totalDays}/${totalDays} Days)`;
+                    } else {
+                      // Mixed summary
+                      badgeBg = '#f8fafc';
+                      badgeColor = '#334155';
+                      badgeBorder = '#cbd5e1';
+                      badgeLabel = `${summary.absentCount > 0 ? `🔴 ${summary.absentCount}A ` : ''}${summary.presentCount > 0 ? `🟢 ${summary.presentCount}P ` : ''}${summary.lateCount > 0 ? `🟡 ${summary.lateCount}L ` : ''}${summary.leaveCount > 0 ? `🏖️ ${summary.leaveCount}Lv ` : ''}`.trim() || '⏳ Pending';
+                    }
                   }
+
+                  const tooltipText = summary.dailyList.map(d => `${d.date}: ${d.status}${d.reason ? ` (${d.reason})` : ''}`).join('\n');
 
                   return (
                     <tr 
@@ -915,7 +1091,7 @@ export const WhatsAppMessagingView: React.FC = () => {
                           backgroundColor: badgeBg,
                           color: badgeColor,
                           border: `1px solid ${badgeBorder}`
-                        }} title={(att as any)?.reason || undefined}>
+                        }} title={tooltipText}>
                           {badgeLabel}
                         </span>
                       </td>
