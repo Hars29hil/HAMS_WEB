@@ -17,6 +17,7 @@ const notificationRoutes = require('./routes/notification');
 const tagsRoutes = require('./routes/tags');
 const leadersRoutes = require('./routes/leaders');
 const leavesRoutes = require('./routes/leaves');
+const stringsRoutes = require('./routes/strings');
 const leaveService = require('./services/leaveService');
 const { ensureTablesExist } = require('./services/deviceSecurity');
 
@@ -90,6 +91,8 @@ const pool = require('./config/db');
     try { await pool.query('ALTER TABLE floors ADD COLUMN device_name VARCHAR(100) DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE floors ADD COLUMN last_seen DATETIME DEFAULT NULL'); } catch(e) {}
     try { await pool.query('ALTER TABLE floors ADD COLUMN current_token VARCHAR(100) DEFAULT NULL'); } catch(e) {}
+    try { await pool.query('ALTER TABLE floors ADD COLUMN security_string VARCHAR(255) DEFAULT NULL'); } catch(e) {}
+    try { await pool.query('ALTER TABLE floors ADD COLUMN string_updated_at DATETIME DEFAULT NULL'); } catch(e) {}
 
     // Floor Leaders Table Migration
     await pool.query(`
@@ -424,6 +427,7 @@ app.use('/api/tags', tagsRoutes);
 app.use('/api/leaders', leadersRoutes);
 app.use('/api/leaves', leavesRoutes);
 app.use('/api/admin/leaves', leavesRoutes);
+app.use('/api/strings', stringsRoutes);
 
 // Fallback error handler
 app.use((err, req, res, next) => {

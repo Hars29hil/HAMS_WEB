@@ -11,13 +11,14 @@ import {
   LogOut, 
   QrCode, 
   User, 
-  Phone,
-  Filter,
-  Calendar,
-  Layers,
-  Clock,
-  Users,
-  Check
+  Phone, 
+  Filter, 
+  Calendar, 
+  Layers, 
+  Clock, 
+  Users, 
+  Check, 
+  Tag 
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import apiClient from '../../services/apiClient';
@@ -49,7 +50,9 @@ export const WhatsAppMessagingView: React.FC = () => {
   const [endDate, setEndDate] = useState<string>(todayStr);
   const [selectedSession, setSelectedSession] = useState<string>('night');
   const [selectedFloor, setSelectedFloor] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [tags, setTags] = useState<any[]>([]);
   const [recipientTarget, setRecipientTarget] = useState<'student' | 'parent' | 'both'>('student');
 
   const [multiDayAttendanceMap, setMultiDayAttendanceMap] = useState<Record<string, Record<string, { status: string; marked_at?: string; is_late?: boolean; reason?: string }>>>({});
@@ -108,14 +111,16 @@ export const WhatsAppMessagingView: React.FC = () => {
   const fetchMetadata = async () => {
     setLoading(true);
     try {
-      const [stuRes, flRes, sessRes, repRes] = await Promise.all([
+      const [stuRes, flRes, sessRes, repRes, tagRes] = await Promise.all([
         apiClient.get('/students'),
         apiClient.get('/floors'),
         apiClient.get('/admin/sessions'),
-        apiClient.get('/admin/reports?time_filter=all')
+        apiClient.get('/admin/reports?time_filter=all'),
+        apiClient.get('/tags')
       ]);
       if (stuRes.data.success) setStudents(stuRes.data.data);
       if (flRes.data.success) setFloors(flRes.data.data);
+      if (tagRes.data.success && Array.isArray(tagRes.data.data)) setTags(tagRes.data.data);
       if (sessRes.data.success && Array.isArray(sessRes.data.data)) {
         setSessions(sessRes.data.data);
         if (sessRes.data.data.length > 0 && !selectedSession) {
@@ -428,7 +433,18 @@ export const WhatsAppMessagingView: React.FC = () => {
       }
     }
 
-    // 3. Status filter (Strict Continuous Matching Across the Selected Date Range)
+    // 3. Tag Filter
+    if (selectedTag !== 'all') {
+      const sTags = Array.isArray(s.tags) ? s.tags : [];
+      const hasTag = sTags.some((t: any) => 
+        String(t.id) === String(selectedTag) || 
+        String(t.tag_id) === String(selectedTag) || 
+        String(t.name).toLowerCase() === String(selectedTag).toLowerCase()
+      );
+      if (!hasTag) return false;
+    }
+
+    // 4. Status filter (Strict Continuous Matching Across the Selected Date Range)
     if (statusFilter !== 'all') {
       const summary = getStudentSummary(s);
       
@@ -897,7 +913,34 @@ export const WhatsAppMessagingView: React.FC = () => {
               </select>
             </div>
 
-            {/* 5. Status Filter: Strict Continuous Across Date Range */}
+            {/* 5. Tag Filter */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
+                🏷️ Filter By Tag
+              </label>
+              <select
+                value={selectedTag}
+                onChange={e => setSelectedTag(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  backgroundColor: '#ffffff'
+                }}
+              >
+                <option value="all">All Tags</option>
+                {tags.map(t => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.name} {t.student_count !== undefined ? `(${t.student_count})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 6. Status Filter */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 ⚡ Status Filter {attendanceLoading && <span style={{ fontSize: '10px', color: '#6366f1' }}>⏳</span>}
@@ -917,15 +960,15 @@ export const WhatsAppMessagingView: React.FC = () => {
                 }}
               >
                 <option value="all">All (Present, Late, Absent, Leave & Pending)</option>
-                <option value="absent">🔴 Absent Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
-                <option value="present">🟢 Present Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
-                <option value="late">🟡 Late Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
-                <option value="leave">🏖️ Leave Only {totalDays > 1 ? `(All ${totalDays} Days Continuous)` : ''}</option>
+                <option value="absent">🔴 Absent Only</option>
+                <option value="present">🟢 Present Only</option>
+                <option value="late">🟡 Late Only</option>
+                <option value="leave">🏖️ Leave Only</option>
                 <option value="not_started">⏳ Not Started / Pending</option>
               </select>
             </div>
 
-            {/* 6. Search by Name / ID / Room / Phone */}
+            {/* 7. Search by Name / ID / Room / Phone */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
                 🔍 Search Student

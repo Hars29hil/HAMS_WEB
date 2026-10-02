@@ -13,6 +13,7 @@ import {
   UserCheck, 
   Palmtree, 
   Key,
+  KeyRound,
   X 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -83,6 +84,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   const isAttendance = pathname === '/attendance';
   const isStudents = pathname === '/students';
   const isLeaders = pathname === '/leaders';
+  const isStrings = pathname === '/strings' || pathname === '/floor-strings' || pathname === '/generate-string';
   const isMessages = pathname === '/messages';
   const isAddSession = pathname === '/session_add' || pathname === '/add_session';
 
@@ -151,6 +153,14 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
             <span>User Credentials</span>
           </button>
         )}
+
+        <button
+          className={`nav-item-btn ${isStrings ? 'active' : ''}`}
+          onClick={() => handleNavClick('/strings')}
+        >
+          <KeyRound size={18} className="nav-icon" style={{ color: '#6366f1' }} />
+          <span>Generate String</span>
+        </button>
 
         {canShowWhatsApp && (
           <button

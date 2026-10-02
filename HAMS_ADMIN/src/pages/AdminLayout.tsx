@@ -12,6 +12,7 @@ import { LiveAttendanceManager } from './views/LiveAttendanceManager';
 import { CreateSessionView } from './views/CreateSessionView';
 import { DeviceSecurityView } from './views/DeviceSecurityView';
 import { LeavesManagementView } from './views/LeavesManagementView';
+import { FloorStringsView } from './views/FloorStringsView';
 
 const SessionViewWrapper: React.FC<{ onSessionDeleted: () => void }> = ({ onSessionDeleted }) => {
   const { sessionKey } = useParams<{ sessionKey: string }>();
@@ -63,6 +64,9 @@ export const AdminLayout: React.FC = () => {
     if (p === '/leaders') {
       return { title: 'User Credentials Management', subtitle: 'Create, assign multiple floors, and manage user login credentials' };
     }
+    if (p === '/strings' || p === '/floor-strings' || p === '/generate-string') {
+      return { title: 'Floor String Generator', subtitle: 'Generate and manage floor-wise unique security strings (1 string per floor)' };
+    }
     if (p === '/messages') {
       return { title: 'WhatsApp Automation', subtitle: 'Broadcast real-time attendance alerts to students' };
     }
@@ -108,6 +112,9 @@ export const AdminLayout: React.FC = () => {
             <Route path="/attendance" element={<AttendanceReportsView />} />
             <Route path="/students" element={<StudentsManagementView />} />
             <Route path="/leaders" element={<LeadersManagementView />} />
+            <Route path="/strings" element={<FloorStringsView />} />
+            <Route path="/floor-strings" element={<FloorStringsView />} />
+            <Route path="/generate-string" element={<FloorStringsView />} />
             <Route path="/messages" element={<WhatsAppMessagingView />} />
             <Route path="/leaves" element={<LeavesManagementView />} />
             <Route path="/security" element={<DeviceSecurityView />} />

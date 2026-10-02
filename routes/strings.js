@@ -2,9 +2,8 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const pool = require('../config/db');
-const { verifyAdmin, verifyAdminOrFloorLeader } = require('../middleware/auth');
+const { verifyAdminOrFloorLeader } = require('../middleware/auth');
 
-// Helper to generate a clean, secure unique string for a floor
 function generateFloorToken(floorId) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let rand = '';
@@ -16,22 +15,10 @@ function generateFloorToken(floorId) {
 }
 
 // ------------------------------------------------------------
-// GET /api/floors
+// GET /api/strings or /api/strings/all
+// Fetch all created strings per floor
 // ------------------------------------------------------------
-router.get('/', verifyAdminOrFloorLeader, async (req, res) => {
-  try {
-    const [floors] = await pool.query('SELECT floor_id, floor_name AS name, security_string, string_updated_at FROM floors ORDER BY floor_id ASC');
-    return res.json({ success: true, data: floors });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// ------------------------------------------------------------
-// GET /api/floors/strings (Fetch all created floor strings)
-// ------------------------------------------------------------
-router.get('/strings', async (req, res) => {
+router.get(['/', '/all'], async (req, res) => {
   try {
     const [floors] = await pool.query(`
       SELECT 
@@ -62,15 +49,15 @@ router.get('/strings', async (req, res) => {
       data: result
     });
   } catch (err) {
-    console.error('Error fetching floor strings:', err);
-    return res.status(500).json({ success: false, message: 'Server error fetching floor strings' });
+    console.error('Error in /api/strings:', err);
+    return res.status(500).json({ success: false, message: 'Server error fetching strings' });
   }
 });
 
 // ------------------------------------------------------------
-// GET /api/floors/:floorId/string (Fetch single floor string)
+// GET /api/strings/:floorId
 // ------------------------------------------------------------
-router.get('/:floorId/string', async (req, res) => {
+router.get('/:floorId', async (req, res) => {
   try {
     const { floorId } = req.params;
     const [rows] = await pool.query(
@@ -94,15 +81,15 @@ router.get('/:floorId/string', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching single floor string:', err);
+    console.error(err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ------------------------------------------------------------
-// POST /api/floors/generate-string (Generate/Update 1 string per floor)
+// POST /api/strings/generate
 // ------------------------------------------------------------
-router.post('/generate-string', verifyAdminOrFloorLeader, async (req, res) => {
+router.post('/generate', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const { floor_id, string_value, custom_string } = req.body;
 
@@ -110,49 +97,41 @@ router.post('/generate-string', verifyAdminOrFloorLeader, async (req, res) => {
       return res.status(400).json({ success: false, message: 'floor_id is required' });
     }
 
-    // Check if floor exists
     const [existing] = await pool.query('SELECT floor_id, floor_name FROM floors WHERE floor_id = ?', [floor_id]);
     if (existing.length === 0) {
       return res.status(404).json({ success: false, message: `Floor ID ${floor_id} not found` });
     }
 
-    // Determine string value (either custom provided or auto-generated)
     let finalString = (custom_string || string_value || '').trim();
     if (!finalString) {
       finalString = generateFloorToken(floor_id);
     }
 
-    // Enforce 1 string per floor by updating the floor record
     await pool.query(
       'UPDATE floors SET security_string = ?, string_updated_at = NOW() WHERE floor_id = ?',
       [finalString, floor_id]
-    );
-
-    const [updated] = await pool.query(
-      'SELECT floor_id, floor_name, security_string, string_updated_at FROM floors WHERE floor_id = ?',
-      [floor_id]
     );
 
     return res.json({
       success: true,
       message: `Security string generated successfully for ${existing[0].floor_name}`,
       data: {
-        floor_id: updated[0].floor_id,
-        floor_name: updated[0].floor_name,
-        string_value: updated[0].security_string,
-        updated_at: updated[0].string_updated_at
+        floor_id,
+        floor_name: existing[0].floor_name,
+        string_value: finalString,
+        updated_at: new Date()
       }
     });
   } catch (err) {
-    console.error('Error generating floor string:', err);
-    return res.status(500).json({ success: false, message: 'Server error generating floor string' });
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error generating string' });
   }
 });
 
 // ------------------------------------------------------------
-// POST /api/floors/generate-all-strings (Generate unique strings for all floors)
+// POST /api/strings/generate-all
 // ------------------------------------------------------------
-router.post('/generate-all-strings', verifyAdminOrFloorLeader, async (req, res) => {
+router.post('/generate-all', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const [floors] = await pool.query('SELECT floor_id, floor_name FROM floors ORDER BY floor_id ASC');
     if (floors.length === 0) {
@@ -179,15 +158,15 @@ router.post('/generate-all-strings', verifyAdminOrFloorLeader, async (req, res) 
       data: updatedList
     });
   } catch (err) {
-    console.error('Error generating all floor strings:', err);
-    return res.status(500).json({ success: false, message: 'Server error generating strings for all floors' });
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error generating all strings' });
   }
 });
 
 // ------------------------------------------------------------
-// DELETE /api/floors/:floorId/string (Clear string for a floor)
+// DELETE /api/strings/:floorId
 // ------------------------------------------------------------
-router.delete('/:floorId/string', verifyAdminOrFloorLeader, async (req, res) => {
+router.delete('/:floorId', verifyAdminOrFloorLeader, async (req, res) => {
   try {
     const { floorId } = req.params;
     const [existing] = await pool.query('SELECT floor_id, floor_name FROM floors WHERE floor_id = ?', [floorId]);
@@ -202,32 +181,9 @@ router.delete('/:floorId/string', verifyAdminOrFloorLeader, async (req, res) => 
       message: `Security string cleared for ${existing[0].floor_name}`
     });
   } catch (err) {
-    console.error('Error clearing floor string:', err);
-    return res.status(500).json({ success: false, message: 'Server error clearing floor string' });
-  }
-});
-
-// ------------------------------------------------------------
-// POST /api/floors
-// ------------------------------------------------------------
-router.post('/', verifyAdmin, async (req, res) => {
-  try {
-    const { floor_id, floor_name, esp32_ble_service_uuid, has_wifi } = req.body;
-    
-    if (floor_id === undefined || !floor_name || !esp32_ble_service_uuid) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
-    }
-
-    await pool.query(
-      'INSERT INTO floors (floor_id, floor_name, esp32_ble_service_uuid, has_wifi) VALUES (?, ?, ?, ?)', 
-      [floor_id, floor_name, esp32_ble_service_uuid, has_wifi || false]
-    );
-    return res.status(201).json({ success: true, message: 'Floor added successfully' });
-  } catch (err) {
     console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(500).json({ success: false, message: 'Server error clearing string' });
   }
 });
 
 module.exports = router;
-
